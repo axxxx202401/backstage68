@@ -1,0 +1,22 @@
+{
+  "environments": {
+    "test": {
+      "name": "测试环境",
+      "url": "http://test-otc.68chat.co/",
+      "description": "Test Environment"
+    },
+    "uat": {
+      "name": "预发布环境",
+      "url": "http://uat-otc.68chat.co/",
+      "description": "UAT Environment"
+    },
+    "prod": {
+      "name": "生产环境",
+      "url": "http://otc.68chat.co/",
+      "description": "Production Environment"
+    }
+  },
+  "default_env": "test",
+  "devtools_enabled": false
+}
+

@@ -1,0 +1,100 @@
+name: Build Multi-Platform
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: '环境 (test/uat/prod)'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+          - test
+          - uat
+          - prod
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-latest, ubuntu-20.04, windows-latest]
+
+    runs-on: ${{ matrix.platform }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies (Ubuntu)
+        if: matrix.platform == 'ubuntu-20.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Set environment variables (macOS/Linux)
+        if: matrix.platform != 'windows-latest'
+        run: |
+          ENV=${{ github.event.inputs.environment || 'prod' }}
+          export $(cat env.$ENV | grep -v '^#' | xargs)
+          echo "TAURI_ENV_NAME=$TAURI_ENV_NAME" >> $GITHUB_ENV
+          echo "TAURI_ENV_URL=$TAURI_ENV_URL" >> $GITHUB_ENV
+          echo "TAURI_ENV_KEY=$TAURI_ENV_KEY" >> $GITHUB_ENV
+          echo "TAURI_DEVTOOLS_ENABLED=$TAURI_DEVTOOLS_ENABLED" >> $GITHUB_ENV
+
+      - name: Set environment variables (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: |
+          $ENV = "${{ github.event.inputs.environment }}"
+          if ([string]::IsNullOrEmpty($ENV)) { $ENV = "prod" }
+          Get-Content "env.$ENV" | ForEach-Object {
+            if ($_ -notmatch '^#' -and $_ -match '(.+)=(.+)') {
+              $name = $matches[1]
+              $value = $matches[2]
+              echo "$name=$value" >> $env:GITHUB_ENV
+            }
+          }
+
+      - name: Build Tauri app
+        run: npm run tauri build
+
+      - name: Upload artifacts (macOS)
+        if: matrix.platform == 'macos-latest'
+        uses: actions/upload-artifact@v3
+        with:
+          name: backstage68-macos-${{ github.event.inputs.environment || 'prod' }}
+          path: |
+            src-tauri/target/release/bundle/macos/*.app
+            src-tauri/target/release/bundle/dmg/*.dmg
+
+      - name: Upload artifacts (Windows)
+        if: matrix.platform == 'windows-latest'
+        uses: actions/upload-artifact@v3
+        with:
+          name: backstage68-windows-${{ github.event.inputs.environment || 'prod' }}
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+
+      - name: Upload artifacts (Linux)
+        if: matrix.platform == 'ubuntu-20.04'
+        uses: actions/upload-artifact@v3
+        with:
+          name: backstage68-linux-${{ github.event.inputs.environment || 'prod' }}
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
+
