@@ -39,7 +39,7 @@ pub fn generate_signature_data(timestamp: &str, fingerprint: &str, url: &str) ->
     let path_to_hash = if let Some(idx) = url.find("/base_api/") {
         // 找到 /base_api/，取后面的部分（包括开头的 /）
         &url[idx + 9..]  // "/base_api" 是 9 个字符
-    } else if let Some(idx) = url.find("/base_api") {
+    } else if let Some(_idx) = url.find("/base_api") {
         // 如果是 /base_api 结尾（无斜杠）
         "/"
     } else {

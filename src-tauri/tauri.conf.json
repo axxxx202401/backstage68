@@ -6,17 +6,24 @@
   "build": {
     "beforeDevCommand": "",
     "beforeBuildCommand": "",
-    "devUrl": "http://test-otc.68chat.co/",
-    "frontendDist": "../src"
+    "frontendDist": "../dist"
   },
   "app": {
     "withGlobalTauri": true,
     "windows": [],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' http: https: data: blob: tauri: *",
+      "capabilities": ["default"]
     }
   },
   "bundle": {
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": null,
+      "exceptionDomain": "",
+      "signingIdentity": null,
+      "entitlements": null
+    },
     "active": true,
     "targets": "all",
     "icon": [
@@ -26,5 +33,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
-  }
+  },
+  "plugins": {}
 }

@@ -1,8 +1,14 @@
 (function() {
-  console.log("Tauri Proxy Injection Started");
+  console.log("🚀 Tauri Proxy Injection Started");
 
   // Access Tauri invoke function (Tauri v2)
+  if (!window.__TAURI__ || !window.__TAURI__.core || !window.__TAURI__.core.invoke) {
+    console.error("❌ Tauri API not available! Proxy will not work.");
+    return;
+  }
+  
   const invoke = window.__TAURI__.core.invoke;
+  console.log("✅ Tauri API ready, proxy enabled");
 
   // --- Override window.fetch ---
   const originalFetch = window.fetch;
