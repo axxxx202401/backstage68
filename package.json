@@ -1,0 +1,13 @@
+{
+  "name": "tauri-http-wrapper",
+  "version": "0.0.0",
+  "description": "Tauri app to wrap remote site with custom auth",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}
+
