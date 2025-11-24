@@ -1,7 +1,6 @@
 use tauri::{Builder, WebviewUrl, WebviewWindowBuilder};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use url::Url;
 
 mod proxy;
 mod fingerprint;
@@ -24,16 +23,6 @@ const DEVTOOLS_ENABLED: bool = true; // 强制在生产环境开启，用于调�
 #[tauri::command]
 fn get_env_info() -> Result<String, String> {
     Ok(format!("当前环境: {} ({})", ENV_NAME, ENV_KEY))
-}
-
-#[tauri::command]
-async fn navigate_to_target(window: tauri::WebviewWindow) -> Result<(), String> {
-    let target_url = std::env::var("TAURI_ENV_URL").unwrap_or_else(|_| ENV_URL.to_string());
-    println!("🚀 Rust navigating to: {}", target_url);
-    
-    // 使用 Rust 原生 navigate 方法，这属于 Host 级导航，完全绕过网页端 CSP 限制
-    let url = Url::parse(&target_url).map_err(|e| format!("Invalid URL: {}", e))?;
-    window.navigate(url).map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -100,8 +89,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             proxy::proxy_request,
-            get_env_info,
-            navigate_to_target
+            get_env_info
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
