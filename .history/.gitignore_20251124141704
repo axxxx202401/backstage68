@@ -1,5 +1,0 @@
-# 私钥文件（RSA 2048位）
-# ⚠️ 严禁提交到 Git！仅用于服务端解密验证
-private_key.pem
-public_key.pem
-
