@@ -1,19 +1,19 @@
-# Tauri Windows 打包脚本 (PowerShell)
-# 用法: .\build.ps1 <环境> [-Dev]
-# 示例: 
-#   .\build.ps1 test -Dev    # 测试环境开发模式
-#   .\build.ps1 prod         # 生产环境打包
-
-param(
+﻿param(
     [Parameter(Mandatory=$true)]
     [ValidateSet("test","uat","prod")]
     [string]$Environment,
-    
     [switch]$Dev
 )
 
-# 颜色输出函数
-function Write-ColorOutput {
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+$tauriConfigPath = Join-Path "src-tauri" "tauri.conf.json"
+$tauriTemplatePath = Join-Path "src-tauri" "tauri.template.json"
+$bundlePath = "src-tauri\target\release\bundle"
+$script:tauriConfigApplied = $false
+
+function Write-Section {
     param(
         [string]$Message,
         [string]$Color = "White"
@@ -21,149 +21,244 @@ function Write-ColorOutput {
     Write-Host $Message -ForegroundColor $Color
 }
 
-# 显示横幅
-Write-ColorOutput "====================================" "Green"
-Write-ColorOutput "   Tauri Windows 应用打包" "Green"
-Write-ColorOutput "====================================" "Green"
+function Ensure-TauriTemplate {
+    if (-not (Test-Path $tauriTemplatePath)) {
+        if (Test-Path $tauriConfigPath) {
+            Copy-Item -LiteralPath $tauriConfigPath -Destination $tauriTemplatePath -Force
+        } else {
+            throw "Cannot locate tauri config template."
+        }
+    }
+}
+
+function Apply-TauriConfig {
+    param(
+        [string]$ProductName,
+        [string]$BundleIdentifier
+    )
+
+    Ensure-TauriTemplate
+    $json = Get-Content -LiteralPath $tauriTemplatePath -Raw | ConvertFrom-Json
+
+    if ($ProductName) {
+        $json.productName = $ProductName
+    }
+    if ($BundleIdentifier) {
+        $json.identifier = $BundleIdentifier
+    }
+
+    $jsonString = $json | ConvertTo-Json -Depth 32
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $resolvedPath = Resolve-Path $tauriConfigPath
+    [System.IO.File]::WriteAllText($resolvedPath, $jsonString, $utf8NoBom)
+    $script:tauriConfigApplied = $true
+}
+
+function Restore-TauriConfig {
+    if ($script:tauriConfigApplied -and (Test-Path $tauriTemplatePath)) {
+        Copy-Item -LiteralPath $tauriTemplatePath -Destination $tauriConfigPath -Force
+    }
+}
+
+function Show-Artifacts {
+    param(
+        [string]$Source,
+        [string]$Glob
+    )
+
+    if (-not (Test-Path $Source)) {
+        Write-Section ("[WARN] No artifacts in {0}" -f $Source) "Yellow"
+        return
+    }
+
+    Get-ChildItem -Path $Source -Filter $Glob | ForEach-Object {
+        $size = [math]::Round($_.Length / 1MB, 2)
+        Write-Host ("   {0} ({1} MB)" -f $_.Name, $size)
+        Write-Host ("     {0}" -f $_.FullName) -ForegroundColor Gray
+    }
+}
+
+function Copy-Artifacts {
+    param(
+        [string]$Source,
+        [string]$Destination,
+        [string]$Glob,
+        [string]$ProductName
+    )
+
+    if (-not (Test-Path $Source)) {
+        return
+    }
+
+    Get-ChildItem -Path $Source -Filter $Glob | ForEach-Object {
+        $newName = $_.Name
+        if ($ProductName) {
+            $basePrefix = ($_.BaseName -split "_")[0]
+            if ($basePrefix) {
+                $pattern = [regex]::Escape($basePrefix)
+                $newName = [regex]::Replace($_.Name, $pattern, $ProductName, 1)
+            }
+        }
+
+        $targetPath = Join-Path $Destination $newName
+        Copy-Item -LiteralPath $_.FullName -Destination $targetPath -Force
+    }
+}
+
+function Rename-Artifacts {
+    param(
+        [string]$Source,
+        [string]$Glob,
+        [string]$ProductName
+    )
+
+    if (-not $ProductName -or -not (Test-Path $Source)) {
+        return
+    }
+
+    Get-ChildItem -Path $Source -Filter $Glob | ForEach-Object {
+        $basePrefix = ($_.BaseName -split "_")[0]
+        if ($basePrefix -and $basePrefix -ne $ProductName) {
+            $pattern = [regex]::Escape($basePrefix)
+            $newName = [regex]::Replace($_.Name, $pattern, $ProductName, 1)
+            if ($newName -ne $_.Name) {
+                Rename-Item -LiteralPath $_.FullName -NewName $newName -Force
+            }
+        }
+    }
+}
+
+Write-Section "====================================" "Green"
+Write-Section "   Tauri Windows Build" "Green"
+Write-Section "====================================" "Green"
 Write-Host ""
 
-# 检查环境配置文件
 $envFile = "env.$Environment"
 if (-not (Test-Path $envFile)) {
-    Write-ColorOutput "错误: 环境配置文件 $envFile 不存在" "Red"
+    Write-Section "[ERR] Missing environment file: $envFile" "Red"
     exit 1
 }
 
-Write-ColorOutput "📋 加载环境配置: $Environment" "Yellow"
+Write-Section "[INFO] Loading $envFile" "Yellow"
+$envMap = @{}
 
-# 加载环境变量
-Get-Content $envFile | ForEach-Object {
-    if ($_ -notmatch '^#' -and $_ -match '(.+)=(.+)') {
-        $name = $matches[1].Trim()
-        $value = $matches[2].Trim()
-        
-        # 设置环境变量
-        [Environment]::SetEnvironmentVariable($name, $value, "Process")
-        
-        Write-Host "   $name = $value"
+Get-Content -LiteralPath $envFile -Encoding UTF8 | ForEach-Object {
+    $line = $_.Trim()
+    if ($line.Length -eq 0 -or $line.StartsWith("#")) {
+        return
     }
+    $parts = $line -split "=", 2
+    if ($parts.Length -ne 2) {
+        return
+    }
+    $name = $parts[0].Trim()
+    $value = $parts[1].Trim()
+    $envMap[$name] = $value
+    [Environment]::SetEnvironmentVariable($name, $value, "Process")
+    Write-Host ("   {0} = {1}" -f $name, $value)
 }
 
 Write-Host ""
 
-# 获取环境变量值（用于显示）
-$envName = [Environment]::GetEnvironmentVariable("TAURI_ENV_NAME", "Process")
-$envUrl = [Environment]::GetEnvironmentVariable("TAURI_ENV_URL", "Process")
-$devtools = [Environment]::GetEnvironmentVariable("TAURI_DEVTOOLS_ENABLED", "Process")
-
-Write-ColorOutput "环境信息:" "Cyan"
-Write-Host "   名称: $envName"
-Write-Host "   地址: $envUrl"
-Write-Host "   调试: $devtools"
+Write-Section "[ENV] Details" "Cyan"
+if ($envMap.ContainsKey("TAURI_ENV_NAME")) {
+    Write-Host ("   Name      : {0}" -f $envMap["TAURI_ENV_NAME"])
+}
+if ($envMap.ContainsKey("TAURI_ENV_URL")) {
+    Write-Host ("   URL       : {0}" -f $envMap["TAURI_ENV_URL"])
+}
+if ($envMap.ContainsKey("TAURI_ENV_KEY")) {
+    Write-Host ("   Key       : {0}" -f $envMap["TAURI_ENV_KEY"])
+}
+if ($envMap.ContainsKey("TAURI_DEVTOOLS_ENABLED")) {
+    Write-Host ("   DevTools  : {0}" -f $envMap["TAURI_DEVTOOLS_ENABLED"])
+}
 Write-Host ""
 
-# 检查依赖
-Write-ColorOutput "🔍 检查依赖..." "Yellow"
+Write-Section "[INFO] Checking dependencies..." "Yellow"
 
-# 检查 Node.js
-$nodeVersion = node --version 2>$null
-if (-not $nodeVersion) {
-    Write-ColorOutput "错误: 未安装 Node.js" "Red"
-    Write-ColorOutput "请访问 https://nodejs.org 下载安装" "Yellow"
+try {
+    $nodeVersion = (node --version).Trim()
+    Write-Host ("   [OK] Node.js {0}" -f $nodeVersion)
+} catch {
+    Write-Section "[ERR] Node.js is not installed" "Red"
     exit 1
 }
-Write-Host "   ✓ Node.js: $nodeVersion"
 
-# 检查 Rust
-$rustVersion = rustc --version 2>$null
-if (-not $rustVersion) {
-    Write-ColorOutput "错误: 未安装 Rust" "Red"
-    Write-ColorOutput "请访问 https://rustup.rs 下载安装" "Yellow"
+try {
+    $rustVersion = (rustc --version).Trim()
+    Write-Host ("   [OK] Rust {0}" -f $rustVersion)
+} catch {
+    Write-Section "[ERR] Rust is not installed" "Red"
     exit 1
 }
-Write-Host "   ✓ Rust: $rustVersion"
 
 Write-Host ""
 
-# 开发模式或打包模式
-if ($Dev) {
-    Write-ColorOutput "🚀 启动开发模式..." "Yellow"
-    Write-Host ""
-    
-    npm run tauri dev
-    
-    if ($LASTEXITCODE -ne 0) {
-        Write-ColorOutput "开发模式启动失败" "Red"
+try {
+    Apply-TauriConfig -ProductName $envMap["TAURI_PRODUCT_NAME"] -BundleIdentifier $envMap["TAURI_BUNDLE_IDENTIFIER"]
+
+    if ($Dev) {
+        Write-Section "[DEV] Starting dev mode..." "Yellow"
+        npm run tauri dev
         exit $LASTEXITCODE
     }
-} else {
-    Write-ColorOutput "📦 开始打包..." "Yellow"
-    Write-Host ""
-    
-    # 清理旧的构建文件
-    if (Test-Path "src-tauri\target\release\bundle") {
-        Write-ColorOutput "   清理旧的构建文件..." "Gray"
-        Remove-Item "src-tauri\target\release\bundle" -Recurse -Force -ErrorAction SilentlyContinue
+
+    Write-Section "[BUILD] Cleaning previous bundle..." "Yellow"
+    if (Test-Path $bundlePath) {
+        try {
+            Remove-Item $bundlePath -Recurse -Force -ErrorAction Stop
+        } catch {
+            Write-Section ("[WARN] Could not clean bundle: {0}" -f $_.Exception.Message) "Yellow"
+        }
     }
-    
-    # 开始打包
+
+    Write-Host ""
+    Write-Section "[BUILD] Running npm run tauri build..." "Yellow"
     npm run tauri build
-    
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host ""
-        Write-ColorOutput "====================================" "Green"
-        Write-ColorOutput "✅ 打包成功！" "Green"
-        Write-ColorOutput "====================================" "Green"
-        Write-Host ""
-        
-        # 显示打包文件位置
-        Write-ColorOutput "📁 打包文件位置:" "Cyan"
-        
-        $msiPath = "src-tauri\target\release\bundle\msi"
-        if (Test-Path $msiPath) {
-            Get-ChildItem $msiPath -Filter "*.msi" | ForEach-Object {
-                $size = [math]::Round($_.Length / 1MB, 2)
-                Write-Host "   ✓ $($_.Name) ($size MB)"
-                Write-Host "     路径: $($_.FullName)" -ForegroundColor Gray
-            }
-        } else {
-            Write-ColorOutput "   ⚠ 未找到 .msi 文件" "Yellow"
-        }
-        
-        $nsiPath = "src-tauri\target\release\bundle\nsis"
-        if (Test-Path $nsiPath) {
-            Write-Host ""
-            Get-ChildItem $nsiPath -Filter "*.exe" | ForEach-Object {
-                $size = [math]::Round($_.Length / 1MB, 2)
-                Write-Host "   ✓ $($_.Name) ($size MB)"
-                Write-Host "     路径: $($_.FullName)" -ForegroundColor Gray
-            }
-        }
-        
-        Write-Host ""
-        Write-ColorOutput "💡 提示: 可以在上述路径找到安装包" "Yellow"
-        
-        # 询问是否打开文件夹
-        Write-Host ""
-        $openFolder = Read-Host "是否打开输出文件夹? (Y/N)"
-        if ($openFolder -eq "Y" -or $openFolder -eq "y") {
-            if (Test-Path $msiPath) {
-                explorer $msiPath
-            }
-        }
-        
-    } else {
-        Write-Host ""
-        Write-ColorOutput "====================================" "Red"
-        Write-ColorOutput "❌ 打包失败" "Red"
-        Write-ColorOutput "====================================" "Red"
-        Write-Host ""
-        Write-ColorOutput "常见问题排查:" "Yellow"
-        Write-Host "  1. 检查是否安装了 Visual Studio Build Tools"
-        Write-Host "  2. 检查是否安装了 WiX Toolset 3.11+"
-        Write-Host "  3. 查看上面的错误信息"
-        Write-Host ""
+    if ($LASTEXITCODE -ne 0) {
+        Write-Section "[FAIL] Build failed" "Red"
         exit $LASTEXITCODE
     }
-}
 
+    Write-Host ""
+    Write-Section "[OK] Build finished" "Green"
+
+    $msiSource = Join-Path $bundlePath "msi"
+    $nsisSource = Join-Path $bundlePath "nsis"
+    $targetProductName = $envMap["TAURI_PRODUCT_NAME"]
+    if (-not $targetProductName) {
+        $targetProductName = "Backstage68"
+    }
+
+    Rename-Artifacts $msiSource "*.msi" $targetProductName
+    Rename-Artifacts $nsisSource "*.exe" $targetProductName
+
+    Write-Host ""
+    Write-Section "[INFO] MSI artifacts" "Cyan"
+    Show-Artifacts $msiSource "*.msi"
+
+    Write-Host ""
+    Write-Section "[INFO] NSIS artifacts" "Cyan"
+    Show-Artifacts $nsisSource "*.exe"
+
+    $distRoot = Join-Path "dist" $Environment
+    if (Test-Path $distRoot) {
+        Remove-Item $distRoot -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $distRoot | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $distRoot "msi") | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $distRoot "nsis") | Out-Null
+
+    $msiTarget = Join-Path $distRoot "msi"
+    $nsisTarget = Join-Path $distRoot "nsis"
+
+    Copy-Artifacts $msiSource $msiTarget "*.msi" $targetProductName
+    Copy-Artifacts $nsisSource $nsisTarget "*.exe" $targetProductName
+
+    Write-Host ""
+    Write-Section ("[INFO] Copied installers to {0}" -f $distRoot) "Yellow"
+}
+finally {
+    Restore-TauriConfig
+}
