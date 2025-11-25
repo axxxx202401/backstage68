@@ -38,7 +38,13 @@ cd backstage68
 # 安装依赖
 npm install
 
-# 构建（PowerShell）
+# 首次执行需要允许 PowerShell 脚本
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+
+# 使用构建脚本
+.\build.ps1 -Environment test
+
+# 或手动设置环境变量构建
 $env:TAURI_ENV_NAME="测试环境"
 $env:TAURI_ENV_URL="https://test-otc.68chat.co/"
 $env:TAURI_ENV_KEY="test"

@@ -200,6 +200,17 @@ A: 检查：
 A: 应用未签名，Windows 会警告。选择"详细信息" → "仍要运行"。
 正式分发需要购买代码签名证书。
 
+### Q: PowerShell 提示 "禁止运行脚本"？
+
+A: Windows 默认禁止运行 PowerShell 脚本。解决方案：
+```powershell
+# 临时允许（推荐）
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+
+# 或一次性执行
+powershell -ExecutionPolicy Bypass -File .\build.ps1 -Environment test
+```
+
 ### Q: 安装后无法运行？
 
 A: 检查：

@@ -1,5 +1,9 @@
 # Tauri Windows 构建脚本
 # PowerShell 版本
+#
+# 如果遇到 "无法加载文件...禁止运行脚本" 错误，请执行：
+# Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+# 然后重新运行此脚本
 
 param(
     [Parameter(Mandatory=$true)]
@@ -85,7 +89,7 @@ if ($Dev) {
         if (Test-Path $msiPath) {
             Write-Host ""
             Write-ColorOutput "MSI 安装包:" "White"
-            Get-ChildItem "$msiPath/*.msi" | ForEach-Object {
+            Get-ChildItem "$msiPath/*.msi" -ErrorAction SilentlyContinue | ForEach-Object {
                 $size = "{0:N2} MB" -f ($_.Length / 1MB)
                 Write-Host "   $($_.Name) ($size)"
             }
@@ -94,7 +98,7 @@ if ($Dev) {
         if (Test-Path $nsisPath) {
             Write-Host ""
             Write-ColorOutput "NSIS 安装包:" "White"
-            Get-ChildItem "$nsisPath/*.exe" | ForEach-Object {
+            Get-ChildItem "$nsisPath/*.exe" -ErrorAction SilentlyContinue | ForEach-Object {
                 $size = "{0:N2} MB" -f ($_.Length / 1MB)
                 Write-Host "   $($_.Name) ($size)"
             }

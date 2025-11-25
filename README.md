@@ -27,16 +27,30 @@
 
 ### Windows
 
+**⚡ 一键修复脚本（推荐）：**
+
 ```powershell
-# 构建生产环境
-.\build.ps1 -Environment prod
+# 方法 1
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+.\fix-windows.ps1
 
-# 构建测试环境
-.\build.ps1 -Environment test
-
-# 开发模式
-.\build.ps1 -Environment test -Dev
+# 方法 2
+powershell -ExecutionPolicy Bypass -File .\fix-windows.ps1
 ```
+
+**🔨 直接构建：**
+
+```powershell
+# 首次运行需要允许脚本执行
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+
+# 构建
+.\build.ps1 -Environment test
+.\build.ps1 -Environment prod
+.\build.ps1 -Environment test -Dev  # 开发模式
+```
+
+**❓ 遇到问题？** 查看 [Windows 快速开始指南](WINDOWS_QUICKSTART.md)
 
 ## 📦 构建产物
 
