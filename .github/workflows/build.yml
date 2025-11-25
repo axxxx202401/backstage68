@@ -60,6 +60,13 @@ jobs:
         with:
           targets: ${{ matrix.platform.target }}
 
+      - name: Install macOS build dependencies
+        if: matrix.platform.os == 'macos-latest'
+        run: |
+          # 安装 create-dmg（DMG 打包工具）
+          brew install create-dmg
+          echo "✅ create-dmg installed"
+
       - name: Install dependencies (Ubuntu)
         if: matrix.platform.os == 'ubuntu-22.04'
         run: |
@@ -90,33 +97,40 @@ jobs:
           echo "environment=${ENV}" >> $GITHUB_OUTPUT
           echo "🌍 Building for environment: ${ENV}"
 
-      - name: Load environment variables
+      - name: Set environment variables
         shell: bash
         run: |
-          ENV_FILE=".env.${{ steps.env.outputs.environment }}"
+          ENV="${{ steps.env.outputs.environment }}"
+          echo "🌍 Setting up environment: $ENV"
           
-          # 调试信息
-          echo "📂 Current directory: $(pwd)"
-          echo "📋 Environment: ${{ steps.env.outputs.environment }}"
-          echo "📄 Looking for: $ENV_FILE"
-          echo "📁 Files in current directory:"
-          ls -la .env* || echo "No .env files found"
-          
-          if [ ! -f "$ENV_FILE" ]; then
-            echo "❌ Environment file not found: $ENV_FILE"
-            exit 1
+          # 根据环境设置变量
+          if [ "$ENV" == "test" ]; then
+            echo "TAURI_ENV_NAME=测试环境" >> $GITHUB_ENV
+            echo "TAURI_ENV_KEY=test" >> $GITHUB_ENV
+            echo "TAURI_ENV_URL=https://test-otc.68chat.co/" >> $GITHUB_ENV
+            echo "TAURI_DEVTOOLS_ENABLED=true" >> $GITHUB_ENV
+            echo "TAURI_ENABLE_LOGS=true" >> $GITHUB_ENV
+            echo "TAURI_PRODUCT_NAME=Backstage68-Test" >> $GITHUB_ENV
+            echo "TAURI_BUNDLE_IDENTIFIER=com.backstage68.test" >> $GITHUB_ENV
+          elif [ "$ENV" == "uat" ]; then
+            echo "TAURI_ENV_NAME=预发布环境" >> $GITHUB_ENV
+            echo "TAURI_ENV_KEY=uat" >> $GITHUB_ENV
+            echo "TAURI_ENV_URL=https://stage-otc.68chat.co/" >> $GITHUB_ENV
+            echo "TAURI_DEVTOOLS_ENABLED=true" >> $GITHUB_ENV
+            echo "TAURI_ENABLE_LOGS=false" >> $GITHUB_ENV
+            echo "TAURI_PRODUCT_NAME=Backstage68-UAT" >> $GITHUB_ENV
+            echo "TAURI_BUNDLE_IDENTIFIER=com.backstage68.uat" >> $GITHUB_ENV
+          elif [ "$ENV" == "prod" ]; then
+            echo "TAURI_ENV_NAME=生产环境" >> $GITHUB_ENV
+            echo "TAURI_ENV_KEY=prod" >> $GITHUB_ENV
+            echo "TAURI_ENV_URL=https://b12e88-gg-ooxx.8cmanage.com/" >> $GITHUB_ENV
+            echo "TAURI_DEVTOOLS_ENABLED=false" >> $GITHUB_ENV
+            echo "TAURI_ENABLE_LOGS=false" >> $GITHUB_ENV
+            echo "TAURI_PRODUCT_NAME=Backstage68" >> $GITHUB_ENV
+            echo "TAURI_BUNDLE_IDENTIFIER=com.backstage68.app" >> $GITHUB_ENV
           fi
           
-          # 导出环境变量到 GITHUB_ENV
-          while IFS= read -r line; do
-            # 跳过空行和注释
-            if [[ -z "$line" ]] || [[ "$line" =~ ^# ]]; then
-              continue
-            fi
-            echo "$line" >> $GITHUB_ENV
-          done < "$ENV_FILE"
-          
-          echo "✅ Environment variables loaded from $ENV_FILE"
+          echo "✅ Environment variables set for $ENV"
 
       - name: Update tauri.conf.json
         shell: bash
@@ -133,6 +147,20 @@ jobs:
           echo "  - Product Name: $TAURI_PRODUCT_NAME"
           echo "  - Bundle ID: $TAURI_BUNDLE_IDENTIFIER"
 
+      - name: Fix DMG bundle script (macOS)
+        if: matrix.platform.os == 'macos-latest'
+        shell: bash
+        run: |
+          # 预先创建 bundle 目录以避免脚本查找问题
+          mkdir -p src-tauri/target/${{ matrix.platform.target }}/release/bundle/dmg
+          
+          # 如果脚本已存在，确保它有执行权限
+          if [ -f "src-tauri/target/${{ matrix.platform.target }}/release/bundle/dmg/bundle_dmg.sh" ]; then
+            chmod +x src-tauri/target/${{ matrix.platform.target }}/release/bundle/dmg/bundle_dmg.sh
+          fi
+          
+          echo "✅ DMG bundle preparation complete"
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -140,18 +168,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Backstage68 ${{ steps.env.outputs.environment }} ${{ github.ref_name }}'
-          releaseBody: |
-            🚀 **Backstage68 - ${{ steps.env.outputs.environment }} 环境**
-            
-            构建信息:
-            - 环境: ${{ steps.env.outputs.environment }}
-            - 平台: ${{ matrix.platform.name }}
-            - 提交: ${{ github.sha }}
-            - 分支: ${{ github.ref }}
-            
-            下载对应平台的安装包即可使用。
+          # 只在打标签时创建 Release
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          releaseName: ${{ github.ref_type == 'tag' && format('Backstage68 {0}', github.ref_name) || '' }}
+          releaseBody: ${{ github.ref_type == 'tag' && '🚀 Release build' || '' }}
           releaseDraft: true
           prerelease: ${{ steps.env.outputs.environment != 'prod' }}
           args: --target ${{ matrix.platform.target }}
