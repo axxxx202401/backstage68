@@ -13,6 +13,27 @@ const ENV_NAME: &str = env!("TAURI_ENV_NAME");
 const ENV_URL: &str = env!("TAURI_ENV_URL");
 const ENV_KEY: &str = env!("TAURI_ENV_KEY");
 
+// 编译时判断是否启用日志（使用字节比较避免 const 限制）
+#[cfg(debug_assertions)]
+const ENABLE_LOGS: bool = true;
+
+#[cfg(not(debug_assertions))]
+const ENABLE_LOGS: bool = {
+    match option_env!("TAURI_ENABLE_LOGS") {
+        Some(val) => matches!(val.as_bytes(), b"true"),
+        None => false,
+    }
+};
+
+// 日志宏：根据 ENABLE_LOGS 条件编译
+macro_rules! log {
+    ($($arg:tt)*) => {
+        if ENABLE_LOGS {
+            println!($($arg)*);
+        }
+    };
+}
+
 // 编译时判断是否启用开发者工具
 #[cfg(debug_assertions)]
 const DEVTOOLS_ENABLED: bool = true;
@@ -37,20 +58,20 @@ pub fn run() {
     let inject_script = include_str!("../../src/inject.js").to_string();
     
     // 使用编译时注入的环境变量
-    println!("🌍 Environment: {} ({})", ENV_NAME, ENV_KEY);
-    println!("📍 URL: {}", ENV_URL);
-    println!("🔧 DevTools: {}", if DEVTOOLS_ENABLED { "enabled" } else { "disabled" });
+    log!("🌍 Environment: {} ({})", ENV_NAME, ENV_KEY);
+    log!("📍 URL: {}", ENV_URL);
+    log!("🔧 DevTools: {}", if DEVTOOLS_ENABLED { "enabled" } else { "disabled" });
 
     Builder::default()
         .manage(app_state)
         .setup(move |app| {
-            println!("🚀 Creating window...");
+            log!("🚀 Creating window...");
             
             // 准备注入脚本：将 inject.js 内容和目标 URL 变量合并
             let target_url = ENV_URL.to_string();
             let final_script = format!(
-                "window.TARGET_URL = '{}';\n{}", 
-                target_url,
+                "window.__TAURI_ENABLE_LOGS__ = {};\n{}", 
+                ENABLE_LOGS,
                 inject_script
             );
 
@@ -67,7 +88,7 @@ pub fn run() {
             .build()
             .expect("Failed to create window");
             
-            println!("✓ Window created");
+            log!("✓ Window created");
             
             // 在 devtools 启用时自动打开
             if DEVTOOLS_ENABLED {
@@ -77,7 +98,7 @@ pub fn run() {
                     std::thread::spawn(move || {
                         std::thread::sleep(std::time::Duration::from_secs(3));
                         w2.open_devtools();
-                        println!("✓ DevTools opened");
+                        log!("✓ DevTools opened");
                     });
                 }
                 // 如果 feature 没有开启，避免 unused variable 警告

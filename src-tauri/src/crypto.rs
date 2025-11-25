@@ -2,6 +2,27 @@ use rsa::{RsaPublicKey, Pkcs1v15Encrypt};
 use rsa::pkcs8::DecodePublicKey;
 use base64::{Engine as _, engine::general_purpose};
 
+// 编译时判断是否启用日志（使用字节比较避免 const 限制）
+#[cfg(debug_assertions)]
+const ENABLE_LOGS: bool = true;
+
+#[cfg(not(debug_assertions))]
+const ENABLE_LOGS: bool = {
+    match option_env!("TAURI_ENABLE_LOGS") {
+        Some(val) => matches!(val.as_bytes(), b"true"),
+        None => false,
+    }
+};
+
+// 日志宏
+macro_rules! log {
+    ($($arg:tt)*) => {
+        if ENABLE_LOGS {
+            println!($($arg)*);
+        }
+    };
+}
+
 /// 内置的 RSA 公钥（PEM 格式）
 /// 注意：对应的私钥保存在项目根目录 private_key.pem，仅用于服务端解密
 const PUBLIC_KEY_PEM: &str = r#"-----BEGIN PUBLIC KEY-----
@@ -54,7 +75,7 @@ pub fn generate_signature_data(timestamp: &str, fingerprint: &str, url: &str) ->
         format!("/{}", path_to_hash)
     };
     
-    println!("   📝 Path for hashing (after removing /base_api): {}", final_path);
+    log!("   📝 Path for hashing (after removing /base_api): {}", final_path);
     
     // 路径哈希
     let mut hasher = Sha256::new();

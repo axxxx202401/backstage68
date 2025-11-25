@@ -5,6 +5,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=TAURI_DEVTOOLS_ENABLED");
     println!("cargo:rerun-if-env-changed=TAURI_PRODUCT_NAME");
     println!("cargo:rerun-if-env-changed=TAURI_BUNDLE_IDENTIFIER");
+    println!("cargo:rerun-if-env-changed=TAURI_ENABLE_LOGS");
     tauri_build::build()
 }
 

@@ -1,5 +1,15 @@
 (function() {
-  console.log("🚀 Tauri Proxy Injection Started");
+  // 检查是否启用日志（由 Rust 注入）
+  const ENABLE_LOGS = window.__TAURI_ENABLE_LOGS__ || false;
+  
+  // 日志函数
+  const log = (...args) => {
+    if (ENABLE_LOGS) {
+      log(...args);
+    }
+  };
+  
+  log("🚀 Tauri Proxy Injection Started");
 
   // Access Tauri invoke function (Tauri v2)
   if (!window.__TAURI__ || !window.__TAURI__.core || !window.__TAURI__.core.invoke) {
@@ -8,7 +18,7 @@
   }
   
   const invoke = window.__TAURI__.core.invoke;
-  console.log("✅ Tauri API ready, proxy enabled");
+  log("✅ Tauri API ready, proxy enabled");
 
   // --- Override window.fetch ---
   const originalFetch = window.fetch;
@@ -44,8 +54,8 @@
       return originalFetch.apply(this, arguments);
     }
 
-    console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    console.log("🔄 [Tauri Proxy] Intercepted Fetch:", input);
+    log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    log("🔄 [Tauri Proxy] Intercepted Fetch:", input);
 
     // Prepare headers
     let headers = {};
@@ -81,22 +91,22 @@
       body: body
     };
 
-    console.log("📤 Request Data:", reqData.method, reqData.url);
-    console.log("📋 Headers:", Object.keys(headers).length, "headers");
+    log("📤 Request Data:", reqData.method, reqData.url);
+    log("📋 Headers:", Object.keys(headers).length, "headers");
 
     try {
       // Call Rust Proxy
-      console.log("🚀 Calling Rust proxy_request...");
+      log("🚀 Calling Rust proxy_request...");
       const response = await invoke('proxy_request', { request: reqData });
       
-      console.log("📥 Response Status:", response.status);
+      log("📥 Response Status:", response.status);
       if (response.status === 403) {
         console.error("⚠️ 403 Forbidden! 后端拒绝请求");
-        console.log("响应内容:", response.body.substring(0, 200));
+        log("响应内容:", response.body.substring(0, 200));
       } else {
-        console.log("✅ Request successful");
+        log("✅ Request successful");
       }
-      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+      log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
       
       // Construct Response object
       return new Response(response.body, {
@@ -107,7 +117,7 @@
       
     } catch (err) {
       console.error("❌ Proxy Request Failed:", err);
-      console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+      log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
       throw err;
     }
   };
@@ -221,7 +231,7 @@
 
   // Replace global XHR
   window.XMLHttpRequest = ProxyXHR;
-  console.log("Tauri Proxy Injection Completed");
+  log("Tauri Proxy Injection Completed");
 
 })();
 
