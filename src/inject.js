@@ -5,7 +5,7 @@
   // 日志函数
   const log = (...args) => {
     if (ENABLE_LOGS) {
-      log(...args);
+      console.log(...args);
     }
   };
   
