@@ -1,38 +1,39 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "backstage68",
-  "version": "0.1.0",
-  "identifier": "com.backstage68.app",
-  "build": {
-    "beforeDevCommand": "",
-    "beforeBuildCommand": "",
-    "frontendDist": "../dist"
-  },
   "app": {
-    "withGlobalTauri": true,
-    "windows": [],
     "security": {
-      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' http: https: data: blob: tauri: *",
-      "capabilities": ["default"]
-    }
+      "capabilities": [
+        "default"
+      ],
+      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' http: https: data: blob: tauri: *"
+    },
+    "windows": [],
+    "withGlobalTauri": true
+  },
+  "build": {
+    "beforeBuildCommand": "",
+    "beforeDevCommand": ""
   },
   "bundle": {
-    "macOS": {
-      "frameworks": [],
-      "minimumSystemVersion": null,
-      "exceptionDomain": "",
-      "signingIdentity": null,
-      "entitlements": null
-    },
     "active": true,
-    "targets": "all",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "entitlements": null,
+      "exceptionDomain": "",
+      "frameworks": [],
+      "minimumSystemVersion": null,
+      "signingIdentity": null
+    },
+    "targets": "all"
   },
-  "plugins": {}
+  "identifier": "com.backstage68.test",
+  "plugins": {},
+  "productName": "Backstage68-Test",
+  "version": "0.1.0"
 }

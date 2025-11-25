@@ -82,18 +82,60 @@ if [ "$DEV_MODE" = true ]; then
     npm run tauri dev
 else
     echo -e "${YELLOW}📦 开始打包...${NC}"
+    
+    # 备份原始配置
+    cp src-tauri/tauri.conf.json src-tauri/tauri.conf.json.bak
+    
+    # 修改配置文件
+    jq --arg name "$TAURI_PRODUCT_NAME" --arg id "$TAURI_BUNDLE_IDENTIFIER" \
+        '.productName = $name | .identifier = $id' \
+        src-tauri/tauri.conf.json.bak > src-tauri/tauri.conf.json
+    
+    # 清理之前的构建
+    rm -rf src-tauri/target/release/bundle/
+    
     npm run tauri build
     
-    if [ $? -eq 0 ]; then
+    BUILD_STATUS=$?
+    
+    # 恢复配置
+    mv src-tauri/tauri.conf.json.bak src-tauri/tauri.conf.json
+    
+    if [ $BUILD_STATUS -eq 0 ]; then
+        # 打包成功后，修改 bundle identifier 和重命名
+        MACOS_BUNDLE_DIR="src-tauri/target/release/bundle/macos"
+        OLD_APP_NAME="backstage68.app"
+        NEW_APP_NAME="${TAURI_PRODUCT_NAME}.app"
+        
+        if [ -d "${MACOS_BUNDLE_DIR}/${OLD_APP_NAME}" ]; then
+            echo ""
+            echo -e "${YELLOW}📝 更新应用配置...${NC}"
+            
+            # 修改 Info.plist
+            /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${TAURI_BUNDLE_IDENTIFIER}" \
+                "${MACOS_BUNDLE_DIR}/${OLD_APP_NAME}/Contents/Info.plist"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleName ${TAURI_PRODUCT_NAME}" \
+                "${MACOS_BUNDLE_DIR}/${OLD_APP_NAME}/Contents/Info.plist"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName ${TAURI_PRODUCT_NAME}" \
+                "${MACOS_BUNDLE_DIR}/${OLD_APP_NAME}/Contents/Info.plist"
+            
+            # 重命名 app
+            if [ "${OLD_APP_NAME}" != "${NEW_APP_NAME}" ]; then
+                mv "${MACOS_BUNDLE_DIR}/${OLD_APP_NAME}" "${MACOS_BUNDLE_DIR}/${NEW_APP_NAME}"
+                echo "   ✓ 应用已重命名为: ${NEW_APP_NAME}"
+            fi
+        fi
+        
         echo ""
         echo -e "${GREEN}====================================${NC}"
         echo -e "${GREEN}✅ 打包成功！${NC}"
         echo -e "${GREEN}====================================${NC}"
         echo ""
-        echo "打包文件位置:"
-        echo "  macOS:   src-tauri/target/release/bundle/macos/"
-        echo "  Windows: src-tauri/target/release/bundle/msi/"
-        echo "  Linux:   src-tauri/target/release/bundle/appimage/"
+        echo "应用位置: ${MACOS_BUNDLE_DIR}/${NEW_APP_NAME}"
+        echo ""
+        echo "Bundle ID: ${TAURI_BUNDLE_IDENTIFIER}"
+        echo "环境: ${TAURI_ENV_NAME} (${TAURI_ENV_KEY})"
+        echo "URL: ${TAURI_ENV_URL}"
     else
         echo -e "${RED}❌ 打包失败${NC}"
         exit 1
