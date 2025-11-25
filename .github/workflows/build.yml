@@ -164,19 +164,3 @@ jobs:
             src-tauri/target/${{ matrix.platform.target }}/release/bundle/**/*
             !src-tauri/target/${{ matrix.platform.target }}/release/bundle/**/._*
           retention-days: 7
-
-  # 构建完成后的通知任务（可选）
-  notify:
-    needs: build
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Build Status
-        run: |
-          if [ "${{ needs.build.result }}" == "success" ]; then
-            echo "✅ 所有平台构建成功！"
-          else
-            echo "❌ 构建失败，请检查日志"
-            exit 1
-          fi
-
