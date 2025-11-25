@@ -46,6 +46,51 @@ fn get_env_info() -> Result<String, String> {
     Ok(format!("当前环境: {} ({})", ENV_NAME, ENV_KEY))
 }
 
+// 设置页面缩放（使用 CSS transform）
+#[tauri::command]
+async fn set_zoom(window: tauri::Window, zoom_level: f64) -> Result<(), String> {
+    let script = format!(
+        r#"
+        (function() {{
+            let body = document.body;
+            if (!body) {{
+                document.addEventListener('DOMContentLoaded', function() {{
+                    document.body.style.transform = 'scale({})';
+                    document.body.style.transformOrigin = 'top left';
+                    document.body.style.width = '{}%';
+                    document.body.style.height = '{}%';
+                }});
+            }} else {{
+                body.style.transform = 'scale({})';
+                body.style.transformOrigin = 'top left';
+                body.style.width = '{}%';
+                body.style.height = '{}%';
+            }}
+        }})();
+        "#,
+        zoom_level,
+        100.0 / zoom_level,
+        100.0 / zoom_level,
+        zoom_level,
+        100.0 / zoom_level,
+        100.0 / zoom_level
+    );
+    
+    // 获取窗口的主 webview 并执行脚本
+    if let Some(webview) = window.webviews().first() {
+        webview.eval(&script).map_err(|e| e.to_string())
+    } else {
+        Err("No webview found".to_string())
+    }
+}
+
+// 获取当前缩放级别（从前端存储）
+#[tauri::command]
+async fn get_zoom() -> Result<f64, String> {
+    // 缩放级别由前端 JavaScript 管理
+    Ok(1.0)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let client = reqwest::Client::builder()
@@ -110,7 +155,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             proxy::proxy_request,
-            get_env_info
+            get_env_info,
+            set_zoom,
+            get_zoom
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

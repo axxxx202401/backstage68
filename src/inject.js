@@ -231,7 +231,91 @@
 
   // Replace global XHR
   window.XMLHttpRequest = ProxyXHR;
-  log("Tauri Proxy Injection Completed");
+  log("✅ Tauri Proxy Injection Completed");
+
+  // ======================================
+  // 页面缩放功能
+  // ======================================
+  let currentZoom = 1.0;
+  const MIN_ZOOM = 0.5;
+  const MAX_ZOOM = 3.0;
+  const ZOOM_STEP = 0.1;
+
+  // 应用缩放
+  async function applyZoom(zoom) {
+    try {
+      await invoke('set_zoom', { zoomLevel: zoom });
+      currentZoom = zoom;
+      log(`🔍 缩放: ${Math.round(zoom * 100)}%`);
+    } catch (err) {
+      console.error("缩放失败:", err);
+    }
+  }
+
+  // 放大
+  async function zoomIn() {
+    const newZoom = Math.min(currentZoom + ZOOM_STEP, MAX_ZOOM);
+    await applyZoom(newZoom);
+  }
+
+  // 缩小
+  async function zoomOut() {
+    const newZoom = Math.max(currentZoom - ZOOM_STEP, MIN_ZOOM);
+    await applyZoom(newZoom);
+  }
+
+  // 重置缩放
+  async function zoomReset() {
+    await applyZoom(1.0);
+  }
+
+  // 监听键盘快捷键
+  document.addEventListener('keydown', async (e) => {
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const ctrlKey = isMac ? e.metaKey : e.ctrlKey;
+
+    // Ctrl/Cmd + Plus/Equal (放大)
+    if (ctrlKey && (e.key === '+' || e.key === '=')) {
+      e.preventDefault();
+      await zoomIn();
+    }
+    // Ctrl/Cmd + Minus (缩小)
+    else if (ctrlKey && e.key === '-') {
+      e.preventDefault();
+      await zoomOut();
+    }
+    // Ctrl/Cmd + 0 (重置)
+    else if (ctrlKey && e.key === '0') {
+      e.preventDefault();
+      await zoomReset();
+    }
+  });
+
+  // 监听鼠标滚轮缩放 (Ctrl/Cmd + Wheel)
+  document.addEventListener('wheel', async (e) => {
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const ctrlKey = isMac ? e.metaKey : e.ctrlKey;
+
+    if (ctrlKey) {
+      e.preventDefault();
+      if (e.deltaY < 0) {
+        await zoomIn();
+      } else {
+        await zoomOut();
+      }
+    }
+  }, { passive: false });
+
+  // 暴露到全局，方便调试
+  window.tauriZoom = {
+    zoomIn,
+    zoomOut,
+    reset: zoomReset,
+    get: () => currentZoom,
+    set: applyZoom
+  };
+
+  log("🔍 页面缩放功能已启用");
 
 })();
 
