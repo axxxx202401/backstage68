@@ -94,6 +94,14 @@ jobs:
         shell: bash
         run: |
           ENV_FILE=".env.${{ steps.env.outputs.environment }}"
+          
+          # 调试信息
+          echo "📂 Current directory: $(pwd)"
+          echo "📋 Environment: ${{ steps.env.outputs.environment }}"
+          echo "📄 Looking for: $ENV_FILE"
+          echo "📁 Files in current directory:"
+          ls -la .env* || echo "No .env files found"
+          
           if [ ! -f "$ENV_FILE" ]; then
             echo "❌ Environment file not found: $ENV_FILE"
             exit 1
