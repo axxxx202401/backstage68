@@ -1,12 +1,9 @@
-# Tauri Windows 打包脚本 (PowerShell)
-# 用法: .\build.ps1 <环境> [-Dev]
-# 示例: 
-#   .\build.ps1 test -Dev    # 测试环境开发模式
-#   .\build.ps1 prod         # 生产环境打包
+# Tauri Windows 构建脚本
+# PowerShell 版本
 
 param(
     [Parameter(Mandatory=$true)]
-    [ValidateSet("test","uat","prod")]
+    [ValidateSet("test", "uat", "prod")]
     [string]$Environment,
     
     [switch]$Dev
@@ -14,16 +11,12 @@ param(
 
 # 颜色输出函数
 function Write-ColorOutput {
-    param(
-        [string]$Message,
-        [string]$Color = "White"
-    )
+    param([string]$Message, [string]$Color = "White")
     Write-Host $Message -ForegroundColor $Color
 }
 
-# 显示横幅
 Write-ColorOutput "====================================" "Green"
-Write-ColorOutput "   Tauri Windows 应用打包" "Green"
+Write-ColorOutput "   Tauri 应用打包 (Windows)" "Green"
 Write-ColorOutput "====================================" "Green"
 Write-Host ""
 
@@ -34,136 +27,86 @@ if (-not (Test-Path $envFile)) {
     exit 1
 }
 
-Write-ColorOutput "📋 加载环境配置: $Environment" "Yellow"
-
 # 加载环境变量
+Write-ColorOutput "📋 加载环境配置: $Environment" "Yellow"
 Get-Content $envFile | ForEach-Object {
-    if ($_ -notmatch '^#' -and $_ -match '(.+)=(.+)') {
-        $name = $matches[1].Trim()
-        $value = $matches[2].Trim()
-        
-        # 设置环境变量
-        [Environment]::SetEnvironmentVariable($name, $value, "Process")
-        
+    if ($_ -match '^([^=]+)=(.*)$') {
+        $name = $matches[1]
+        $value = $matches[2]
+        Set-Item -Path "env:$name" -Value $value
         Write-Host "   $name = $value"
     }
 }
-
-Write-Host ""
-
-# 获取环境变量值（用于显示）
-$envName = [Environment]::GetEnvironmentVariable("TAURI_ENV_NAME", "Process")
-$envUrl = [Environment]::GetEnvironmentVariable("TAURI_ENV_URL", "Process")
-$devtools = [Environment]::GetEnvironmentVariable("TAURI_DEVTOOLS_ENABLED", "Process")
-
-Write-ColorOutput "环境信息:" "Cyan"
-Write-Host "   名称: $envName"
-Write-Host "   地址: $envUrl"
-Write-Host "   调试: $devtools"
-Write-Host ""
-
-# 检查依赖
-Write-ColorOutput "🔍 检查依赖..." "Yellow"
-
-# 检查 Node.js
-$nodeVersion = node --version 2>$null
-if (-not $nodeVersion) {
-    Write-ColorOutput "错误: 未安装 Node.js" "Red"
-    Write-ColorOutput "请访问 https://nodejs.org 下载安装" "Yellow"
-    exit 1
-}
-Write-Host "   ✓ Node.js: $nodeVersion"
-
-# 检查 Rust
-$rustVersion = rustc --version 2>$null
-if (-not $rustVersion) {
-    Write-ColorOutput "错误: 未安装 Rust" "Red"
-    Write-ColorOutput "请访问 https://rustup.rs 下载安装" "Yellow"
-    exit 1
-}
-Write-Host "   ✓ Rust: $rustVersion"
-
 Write-Host ""
 
 # 开发模式或打包模式
 if ($Dev) {
     Write-ColorOutput "🚀 启动开发模式..." "Yellow"
-    Write-Host ""
-    
     npm run tauri dev
-    
-    if ($LASTEXITCODE -ne 0) {
-        Write-ColorOutput "开发模式启动失败" "Red"
-        exit $LASTEXITCODE
-    }
 } else {
-    Write-ColorOutput "📦 开始打包..." "Yellow"
+    Write-ColorOutput "📦 开始打包 Windows 版本..." "Yellow"
     Write-Host ""
     
-    # 清理旧的构建文件
-    if (Test-Path "src-tauri\target\release\bundle") {
-        Write-ColorOutput "   清理旧的构建文件..." "Gray"
-        Remove-Item "src-tauri\target\release\bundle" -Recurse -Force -ErrorAction SilentlyContinue
+    # 备份原始配置
+    Copy-Item "src-tauri/tauri.conf.json" "src-tauri/tauri.conf.json.bak"
+    
+    # 修改配置文件（使用 PowerShell JSON 处理）
+    $config = Get-Content "src-tauri/tauri.conf.json" | ConvertFrom-Json
+    $config.productName = $env:TAURI_PRODUCT_NAME
+    $config.identifier = $env:TAURI_BUNDLE_IDENTIFIER
+    $config | ConvertTo-Json -Depth 100 | Set-Content "src-tauri/tauri.conf.json"
+    
+    # 清理之前的构建
+    if (Test-Path "src-tauri/target/release/bundle") {
+        Remove-Item "src-tauri/target/release/bundle" -Recurse -Force
     }
     
-    # 开始打包
+    # 构建
     npm run tauri build
     
-    if ($LASTEXITCODE -eq 0) {
+    $buildStatus = $LASTEXITCODE
+    
+    # 恢复配置
+    Move-Item "src-tauri/tauri.conf.json.bak" "src-tauri/tauri.conf.json" -Force
+    
+    if ($buildStatus -eq 0) {
         Write-Host ""
         Write-ColorOutput "====================================" "Green"
-        Write-ColorOutput "✅ 打包成功！" "Green"
+        Write-ColorOutput "✅ Windows 打包成功！" "Green"
         Write-ColorOutput "====================================" "Green"
         Write-Host ""
         
-        # 显示打包文件位置
-        Write-ColorOutput "📁 打包文件位置:" "Cyan"
+        # 显示构建产物
+        Write-ColorOutput "📦 构建产物:" "Cyan"
         
-        $msiPath = "src-tauri\target\release\bundle\msi"
+        $msiPath = "src-tauri/target/release/bundle/msi"
+        $nsisPath = "src-tauri/target/release/bundle/nsis"
+        
         if (Test-Path $msiPath) {
-            Get-ChildItem $msiPath -Filter "*.msi" | ForEach-Object {
-                $size = [math]::Round($_.Length / 1MB, 2)
-                Write-Host "   ✓ $($_.Name) ($size MB)"
-                Write-Host "     路径: $($_.FullName)" -ForegroundColor Gray
-            }
-        } else {
-            Write-ColorOutput "   ⚠ 未找到 .msi 文件" "Yellow"
-        }
-        
-        $nsiPath = "src-tauri\target\release\bundle\nsis"
-        if (Test-Path $nsiPath) {
             Write-Host ""
-            Get-ChildItem $nsiPath -Filter "*.exe" | ForEach-Object {
-                $size = [math]::Round($_.Length / 1MB, 2)
-                Write-Host "   ✓ $($_.Name) ($size MB)"
-                Write-Host "     路径: $($_.FullName)" -ForegroundColor Gray
+            Write-ColorOutput "MSI 安装包:" "White"
+            Get-ChildItem "$msiPath/*.msi" | ForEach-Object {
+                $size = "{0:N2} MB" -f ($_.Length / 1MB)
+                Write-Host "   $($_.Name) ($size)"
+            }
+        }
+        
+        if (Test-Path $nsisPath) {
+            Write-Host ""
+            Write-ColorOutput "NSIS 安装包:" "White"
+            Get-ChildItem "$nsisPath/*.exe" | ForEach-Object {
+                $size = "{0:N2} MB" -f ($_.Length / 1MB)
+                Write-Host "   $($_.Name) ($size)"
             }
         }
         
         Write-Host ""
-        Write-ColorOutput "💡 提示: 可以在上述路径找到安装包" "Yellow"
-        
-        # 询问是否打开文件夹
-        Write-Host ""
-        $openFolder = Read-Host "是否打开输出文件夹? (Y/N)"
-        if ($openFolder -eq "Y" -or $openFolder -eq "y") {
-            if (Test-Path $msiPath) {
-                explorer $msiPath
-            }
-        }
+        Write-Host "产品名称: $env:TAURI_PRODUCT_NAME"
+        Write-Host "环境: $env:TAURI_ENV_NAME ($env:TAURI_ENV_KEY)"
+        Write-Host "URL: $env:TAURI_ENV_URL"
         
     } else {
-        Write-Host ""
-        Write-ColorOutput "====================================" "Red"
         Write-ColorOutput "❌ 打包失败" "Red"
-        Write-ColorOutput "====================================" "Red"
-        Write-Host ""
-        Write-ColorOutput "常见问题排查:" "Yellow"
-        Write-Host "  1. 检查是否安装了 Visual Studio Build Tools"
-        Write-Host "  2. 检查是否安装了 WiX Toolset 3.11+"
-        Write-Host "  3. 查看上面的错误信息"
-        Write-Host ""
-        exit $LASTEXITCODE
+        exit 1
     }
 }
-

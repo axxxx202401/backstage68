@@ -20,17 +20,26 @@ usage() {
     echo "  prod    - 生产环境"
     echo ""
     echo "选项:"
-    echo "  -d, --dev     开发模式（不打包）"
-    echo "  -h, --help    显示帮助信息"
+    echo "  -d, --dev       开发模式（不打包）"
+    echo "  -h, --help      显示帮助信息"
     echo ""
     echo "示例:"
-    echo "  $0 test -d    # 测试环境开发模式"
-    echo "  $0 prod       # 生产环境打包"
+    echo "  $0 test -d      # 测试环境开发模式"
+    echo "  $0 prod         # 生产环境打包"
+    echo ""
+    echo "💡 Windows 构建:"
+    echo "  - Windows 上: build.ps1 -Environment prod"
+    echo "  - 自动化: 使用 GitHub Actions"
     exit 1
 }
 
 # 检查参数
 if [ $# -eq 0 ]; then
+    usage
+fi
+
+# 检查是否是帮助选项
+if [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then
     usage
 fi
 
@@ -94,6 +103,7 @@ else
     # 清理之前的构建
     rm -rf src-tauri/target/release/bundle/
     
+    # 构建
     npm run tauri build
     
     BUILD_STATUS=$?
@@ -102,7 +112,7 @@ else
     mv src-tauri/tauri.conf.json.bak src-tauri/tauri.conf.json
     
     if [ $BUILD_STATUS -eq 0 ]; then
-        # 打包成功后，修改 bundle identifier 和重命名
+        # macOS 构建后处理
         MACOS_BUNDLE_DIR="src-tauri/target/release/bundle/macos"
         OLD_APP_NAME="backstage68.app"
         NEW_APP_NAME="${TAURI_PRODUCT_NAME}.app"

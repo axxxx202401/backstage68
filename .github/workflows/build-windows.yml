@@ -1,0 +1,80 @@
+name: Build Windows Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: '构建环境'
+        required: true
+        type: choice
+        options:
+          - test
+          - uat
+          - prod
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 设置 Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: 安装依赖
+        run: npm install
+
+      - name: 加载环境变量
+        shell: bash
+        run: |
+          ENV=${{ github.event.inputs.environment }}
+          if [ -f "env.${ENV}" ]; then
+            cat "env.${ENV}" >> $GITHUB_ENV
+            echo "✓ 已加载 env.${ENV}"
+          else
+            echo "❌ 环境文件 env.${ENV} 不存在"
+            exit 1
+          fi
+
+      - name: 更新 tauri.conf.json
+        shell: bash
+        run: |
+          jq --arg name "$TAURI_PRODUCT_NAME" --arg id "$TAURI_BUNDLE_IDENTIFIER" \
+            '.productName = $name | .identifier = $id' \
+            src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp
+          mv src-tauri/tauri.conf.json.tmp src-tauri/tauri.conf.json
+
+      - name: 构建 Tauri 应用
+        run: npm run tauri build
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.TAURI_PRODUCT_NAME }}-${{ github.event.inputs.environment }}-windows
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+
+      - name: 构建信息
+        shell: bash
+        run: |
+          echo "🎉 构建完成！"
+          echo "产品名称: $TAURI_PRODUCT_NAME"
+          echo "环境: $TAURI_ENV_NAME ($TAURI_ENV_KEY)"
+          echo "URL: $TAURI_ENV_URL"
+          echo ""
+          echo "MSI 安装包:"
+          ls -lh src-tauri/target/release/bundle/msi/*.msi 2>/dev/null || echo "  (未生成)"
+          echo ""
+          echo "NSIS 安装包:"
+          ls -lh src-tauri/target/release/bundle/nsis/*.exe 2>/dev/null || echo "  (未生成)"
+
