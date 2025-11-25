@@ -32,8 +32,8 @@
     },
     "targets": "all"
   },
-  "identifier": "com.backstage68.prod",
+  "identifier": "com.backstage68.test",
   "plugins": {},
-  "productName": "Backstage68",
+  "productName": "Backstage68-Test",
   "version": "0.1.0"
 }

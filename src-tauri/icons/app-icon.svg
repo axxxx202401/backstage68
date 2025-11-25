@@ -1,33 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- 背景圆角矩形，现代渐变 -->
   <defs>
-    <!-- 背景渐变 -->
     <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#5B9BD5;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#2E5C8A;stop-opacity:1" />
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
     </linearGradient>
     
-    <!-- 盾牌渐变 -->
-    <linearGradient id="shieldGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" style="stop-color:#6BB6FF;stop-opacity:1" />
-      <stop offset="50%" style="stop-color:#4A9FE8;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#2E7BBF;stop-opacity:1" />
-    </linearGradient>
-    
-    <!-- 章鱼渐变 -->
-    <linearGradient id="octopusGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" style="stop-color:#FFFFFF;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#D4ECFA;stop-opacity:1" />
-    </linearGradient>
-    
-    <!-- 锁渐变 -->
-    <linearGradient id="lockGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" style="stop-color:#FFD966;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#C9A641;stop-opacity:1" />
-    </linearGradient>
-    
-    <!-- 阴影 -->
-    <filter id="shadow">
-      <feGaussianBlur in="SourceAlpha" stdDeviation="8"/>
+    <!-- 文字阴影 -->
+    <filter id="textShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4"/>
       <feOffset dx="0" dy="4" result="offsetblur"/>
       <feComponentTransfer>
         <feFuncA type="linear" slope="0.3"/>
@@ -37,130 +18,37 @@
         <feMergeNode in="SourceGraphic"/>
       </feMerge>
     </filter>
+    
+    <!-- 光泽效果 -->
+    <linearGradient id="shine" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:0.3" />
+      <stop offset="50%" style="stop-color:#ffffff;stop-opacity:0.1" />
+      <stop offset="100%" style="stop-color:#ffffff;stop-opacity:0" />
+    </linearGradient>
   </defs>
   
-  <!-- 圆角矩形背景 -->
-  <rect x="0" y="0" width="1024" height="1024" rx="229" ry="229" fill="url(#bgGradient)"/>
+  <!-- macOS 风格圆角矩形背景 -->
+  <rect x="0" y="0" width="512" height="512" rx="115" ry="115" fill="url(#bgGradient)"/>
   
-  <!-- 盾牌 -->
-  <g transform="translate(512, 512)">
-    <!-- 盾牌主体 -->
-    <path d="M 0,-320 
-             C 180,-320 240,-300 240,-240
-             L 240,80
-             C 240,200 180,280 0,360
-             C -180,280 -240,200 -240,80
-             L -240,-240
-             C -240,-300 -180,-320 0,-320 Z" 
-          fill="url(#shieldGradient)"
-          filter="url(#shadow)"/>
-    
-    <!-- 盾牌边框高光 -->
-    <path d="M 0,-310 
-             C 175,-310 230,-290 230,-230
-             L 230,80
-             C 230,195 175,270 0,345
-             C -175,270 -230,195 -230,80
-             L -230,-230
-             C -230,-290 -175,-310 0,-310 Z" 
-          fill="none" 
-          stroke="#8CC9F5" 
-          stroke-width="4"
-          opacity="0.5"/>
-    
-    <!-- 盾牌内边框阴影 -->
-    <path d="M 0,-300 
-             C 170,-300 220,-280 220,-220
-             L 220,80
-             C 220,190 170,260 0,335
-             C -170,260 -220,190 -220,80
-             L -220,-220
-             C -220,-280 -170,-300 0,-300 Z" 
-          fill="none" 
-          stroke="#1A4D7A" 
-          stroke-width="3"
-          opacity="0.4"/>
-    
-    <!-- 章鱼 -->
-    <g transform="translate(0, -80)" filter="url(#shadow)">
-      <!-- 章鱼头部 -->
-      <ellipse cx="0" cy="0" rx="100" ry="85" fill="url(#octopusGradient)"/>
-      
-      <!-- 眼睛 -->
-      <ellipse cx="-35" cy="-15" rx="18" ry="22" fill="#4A9FE8"/>
-      <ellipse cx="35" cy="-15" rx="18" ry="22" fill="#4A9FE8"/>
-      
-      <!-- 眼睛高光 -->
-      <ellipse cx="-32" cy="-20" rx="6" ry="8" fill="white" opacity="0.7"/>
-      <ellipse cx="38" cy="-20" rx="6" ry="8" fill="white" opacity="0.7"/>
-      
-      <!-- 6条触手（简化） -->
-      <g fill="url(#octopusGradient)" opacity="0.95">
-        <ellipse cx="-70" cy="60" rx="18" ry="70" transform="rotate(-20 -70 60)"/>
-        <ellipse cx="-40" cy="65" rx="16" ry="65" transform="rotate(-8 -40 65)"/>
-        <ellipse cx="-10" cy="68" rx="15" ry="62" transform="rotate(0 -10 68)"/>
-        <ellipse cx="10" cy="68" rx="15" ry="62" transform="rotate(0 10 68)"/>
-        <ellipse cx="40" cy="65" rx="16" ry="65" transform="rotate(8 40 65)"/>
-        <ellipse cx="70" cy="60" rx="18" ry="70" transform="rotate(20 70 60)"/>
-      </g>
-      
-      <!-- 触手上的吸盘 -->
-      <g fill="#B3DFEF" opacity="0.5">
-        <circle cx="-70" cy="90" r="5"/>
-        <circle cx="-40" cy="95" r="4"/>
-        <circle cx="-10" cy="98" r="4"/>
-        <circle cx="10" cy="98" r="4"/>
-        <circle cx="40" cy="95" r="4"/>
-        <circle cx="70" cy="90" r="5"/>
-      </g>
-    </g>
-    
-    <!-- 锁 -->
-    <g transform="translate(0, 150)" filter="url(#shadow)">
-      <!-- 锁身 -->
-      <rect x="-50" y="0" width="100" height="80" rx="12" fill="url(#lockGradient)"/>
-      
-      <!-- 锁身边框 -->
-      <rect x="-50" y="0" width="100" height="80" rx="12" 
-            fill="none" stroke="#A0822E" stroke-width="3"/>
-      
-      <!-- 锁身高光 -->
-      <rect x="-45" y="5" width="90" height="35" rx="8" 
-            fill="white" opacity="0.2"/>
-      
-      <!-- 锁孔 -->
-      <circle cx="0" cy="35" r="12" fill="#8B6F2E"/>
-      <rect x="-5" y="35" width="10" height="25" rx="3" fill="#8B6F2E"/>
-      
-      <!-- 锁扣 -->
-      <path d="M -35,-40 
-               L -35,-10 
-               A 35,35 0 0,1 35,-10 
-               L 35,-40" 
-            fill="none" 
-            stroke="url(#lockGradient)" 
-            stroke-width="18" 
-            stroke-linecap="round"/>
-      
-      <!-- 锁扣内边框 -->
-      <path d="M -30,-38 
-               L -30,-10 
-               A 30,30 0 0,1 30,-10 
-               L 30,-38" 
-            fill="none" 
-            stroke="#A0822E" 
-            stroke-width="3" 
-            stroke-linecap="round"/>
-      
-      <!-- 锁扣高光 -->
-      <path d="M -32,-35 
-               L -32,-12 
-               A 32,32 0 0,1 -10,-12" 
-            fill="none" 
-            stroke="#FFEB99" 
-            stroke-width="4" 
-            stroke-linecap="round"
-            opacity="0.6"/>
-    </g>
-  </g>
+  <!-- 数字 68 - 粗体现代风格 -->
+  <text 
+    x="256" 
+    y="340" 
+    font-family="SF Pro Display, -apple-system, BlinkMacSystemFont, Arial, sans-serif" 
+    font-size="280" 
+    font-weight="900" 
+    text-anchor="middle" 
+    fill="white"
+    filter="url(#textShadow)"
+    letter-spacing="-10">68</text>
+  
+  <!-- 顶部装饰线条 -->
+  <line x1="100" y1="100" x2="412" y2="100" stroke="rgba(255,255,255,0.4)" stroke-width="8" stroke-linecap="round"/>
+  
+  <!-- 小点装饰 -->
+  <circle cx="150" cy="100" r="12" fill="rgba(255,255,255,0.6)"/>
+  <circle cx="362" cy="100" r="12" fill="rgba(255,255,255,0.6)"/>
+  
+  <!-- 光泽叠加层 -->
+  <rect x="0" y="0" width="512" height="256" rx="115" ry="115" fill="url(#shine)" opacity="0.6"/>
 </svg>
