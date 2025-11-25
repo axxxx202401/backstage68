@@ -1,0 +1,247 @@
+stages:
+  - build
+  - release
+
+variables:
+  CARGO_HOME: $CI_PROJECT_DIR/.cargo
+  NODE_VERSION: "20"
+
+# 缓存配置
+.cache_config: &cache_config
+  cache:
+    key:
+      files:
+        - package-lock.json
+        - src-tauri/Cargo.lock
+    paths:
+      - .cargo/
+      - node_modules/
+      - src-tauri/target/
+
+# 环境判断
+.determine_env: &determine_env
+  - |
+    if [ -n "$CI_COMMIT_TAG" ]; then
+      ENV="prod"
+    elif [ "$CI_COMMIT_BRANCH" == "main" ] || [ "$CI_COMMIT_BRANCH" == "master" ]; then
+      ENV="uat"
+    else
+      ENV="test"
+    fi
+    echo "🌍 Building for environment: $ENV"
+    export BUILD_ENV=$ENV
+
+# 加载环境变量
+.load_env: &load_env
+  - |
+    ENV_FILE=".env.$BUILD_ENV"
+    if [ ! -f "$ENV_FILE" ]; then
+      echo "❌ Environment file not found: $ENV_FILE"
+      exit 1
+    fi
+    
+    # 导出环境变量
+    set -a
+    source "$ENV_FILE"
+    set +a
+    
+    echo "✅ Environment variables loaded from $ENV_FILE"
+    echo "  - Product Name: $TAURI_PRODUCT_NAME"
+    echo "  - Bundle ID: $TAURI_BUNDLE_IDENTIFIER"
+
+# 更新配置文件
+.update_config: &update_config
+  - |
+    cp src-tauri/tauri.conf.json src-tauri/tauri.conf.json.bak
+    
+    # 使用 jq 修改配置
+    jq --arg name "$TAURI_PRODUCT_NAME" --arg id "$TAURI_BUNDLE_IDENTIFIER" \
+      '.productName = $name | .identifier = $id' \
+      src-tauri/tauri.conf.json.bak > src-tauri/tauri.conf.json
+    
+    echo "✅ Updated tauri.conf.json"
+
+# macOS 构建（Apple Silicon）
+build:macos-aarch64:
+  stage: build
+  tags:
+    - macos
+    - arm64
+  <<: *cache_config
+  before_script:
+    - *determine_env
+    - *load_env
+    - *update_config
+    # 安装依赖
+    - brew install node@${NODE_VERSION} || true
+    - npm ci
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    - source $HOME/.cargo/env
+    - rustup target add aarch64-apple-darwin
+  script:
+    - npm run tauri build -- --target aarch64-apple-darwin
+  after_script:
+    - mv src-tauri/tauri.conf.json.bak src-tauri/tauri.conf.json || true
+  artifacts:
+    name: "backstage68-$BUILD_ENV-macos-aarch64-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+      - src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
+    expire_in: 7 days
+  only:
+    - main
+    - master
+    - tags
+    - web
+
+# macOS 构建（Intel）
+build:macos-x64:
+  stage: build
+  tags:
+    - macos
+  <<: *cache_config
+  before_script:
+    - *determine_env
+    - *load_env
+    - *update_config
+    - brew install node@${NODE_VERSION} || true
+    - npm ci
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    - source $HOME/.cargo/env
+    - rustup target add x86_64-apple-darwin
+  script:
+    - npm run tauri build -- --target x86_64-apple-darwin
+  after_script:
+    - mv src-tauri/tauri.conf.json.bak src-tauri/tauri.conf.json || true
+  artifacts:
+    name: "backstage68-$BUILD_ENV-macos-x64-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+      - src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app
+    expire_in: 7 days
+  only:
+    - main
+    - master
+    - tags
+    - web
+
+# Windows 构建
+build:windows:
+  stage: build
+  tags:
+    - windows
+  <<: *cache_config
+  before_script:
+    - *determine_env
+    - *load_env
+    - *update_config
+    # Windows 使用 PowerShell
+    - choco install nodejs.install --version=$NODE_VERSION -y
+    - npm ci
+    - choco install rust -y
+    - refreshenv
+  script:
+    - npm run tauri build
+  after_script:
+    - if (Test-Path "src-tauri/tauri.conf.json.bak") { Move-Item -Force src-tauri/tauri.conf.json.bak src-tauri/tauri.conf.json }
+  artifacts:
+    name: "backstage68-$BUILD_ENV-windows-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - src-tauri/target/release/bundle/msi/*.msi
+      - src-tauri/target/release/bundle/nsis/*.exe
+    expire_in: 7 days
+  only:
+    - main
+    - master
+    - tags
+    - web
+
+# Linux 构建
+build:linux:
+  stage: build
+  image: ubuntu:22.04
+  tags:
+    - docker
+  <<: *cache_config
+  before_script:
+    - *determine_env
+    - *load_env
+    - *update_config
+    # 安装依赖
+    - apt-get update
+    - apt-get install -y curl wget git build-essential
+    - apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+    # 安装 Node.js
+    - curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -
+    - apt-get install -y nodejs
+    - npm ci
+    # 安装 Rust
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    - source $HOME/.cargo/env
+  script:
+    - npm run tauri build
+  after_script:
+    - mv src-tauri/tauri.conf.json.bak src-tauri/tauri.conf.json || true
+  artifacts:
+    name: "backstage68-$BUILD_ENV-linux-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - src-tauri/target/release/bundle/deb/*.deb
+      - src-tauri/target/release/bundle/appimage/*.AppImage
+      - src-tauri/target/release/bundle/rpm/*.rpm
+    expire_in: 7 days
+  only:
+    - main
+    - master
+    - tags
+    - web
+
+# 创建 Release（仅在打 tag 时）
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - build:macos-aarch64
+    - build:macos-x64
+    - build:windows
+    - build:linux
+  script:
+    - echo "Creating release for $CI_COMMIT_TAG"
+  release:
+    tag_name: '$CI_COMMIT_TAG'
+    name: 'Backstage68 $CI_COMMIT_TAG'
+    description: |
+      🚀 **Backstage68 Release $CI_COMMIT_TAG**
+      
+      构建信息:
+      - 提交: $CI_COMMIT_SHORT_SHA
+      - 分支: $CI_COMMIT_BRANCH
+      - 时间: $CI_COMMIT_TIMESTAMP
+      
+      ## 📦 下载
+      
+      请根据您的操作系统选择对应的安装包：
+      
+      - **macOS (Apple Silicon)**: `.dmg` (aarch64)
+      - **macOS (Intel)**: `.dmg` (x64)
+      - **Windows**: `.msi` 或 `.exe`
+      - **Linux**: `.deb`, `.rpm` 或 `.AppImage`
+    assets:
+      links:
+        - name: 'macOS (Apple Silicon)'
+          url: '$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/browse?job=build:macos-aarch64'
+        - name: 'macOS (Intel)'
+          url: '$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/browse?job=build:macos-x64'
+        - name: 'Windows'
+          url: '$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/browse?job=build:windows'
+        - name: 'Linux'
+          url: '$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/browse?job=build:linux'
+  only:
+    - tags
+
+# 手动触发构建（任意环境）
+.manual_build:
+  extends: .build_template
+  when: manual
+  variables:
+    BUILD_ENV: "test"  # 可在 GitLab UI 中修改
+

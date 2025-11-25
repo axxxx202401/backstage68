@@ -1,0 +1,182 @@
+name: Build Tauri App
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: '构建环境'
+        required: true
+        default: 'test'
+        type: choice
+        options:
+          - test
+          - uat
+          - prod
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            name: macOS (Apple Silicon)
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            name: macOS (Intel)
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: Windows (x64)
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            name: Linux (x64)
+
+    runs-on: ${{ matrix.platform.os }}
+    name: Build ${{ matrix.platform.name }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform.target }}
+
+      - name: Install dependencies (Ubuntu)
+        if: matrix.platform.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Determine build environment
+        id: env
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            ENV="${{ github.event.inputs.environment }}"
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            ENV="prod"
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]] || [[ "${{ github.ref }}" == "refs/heads/master" ]]; then
+            ENV="uat"
+          else
+            ENV="test"
+          fi
+          echo "environment=${ENV}" >> $GITHUB_OUTPUT
+          echo "🌍 Building for environment: ${ENV}"
+
+      - name: Load environment variables
+        shell: bash
+        run: |
+          ENV_FILE=".env.${{ steps.env.outputs.environment }}"
+          if [ ! -f "$ENV_FILE" ]; then
+            echo "❌ Environment file not found: $ENV_FILE"
+            exit 1
+          fi
+          
+          # 导出环境变量到 GITHUB_ENV
+          while IFS= read -r line; do
+            # 跳过空行和注释
+            if [[ -z "$line" ]] || [[ "$line" =~ ^# ]]; then
+              continue
+            fi
+            echo "$line" >> $GITHUB_ENV
+          done < "$ENV_FILE"
+          
+          echo "✅ Environment variables loaded from $ENV_FILE"
+
+      - name: Update tauri.conf.json
+        shell: bash
+        run: |
+          # 备份原始配置
+          cp src-tauri/tauri.conf.json src-tauri/tauri.conf.json.bak
+          
+          # 使用 jq 修改配置
+          jq --arg name "$TAURI_PRODUCT_NAME" --arg id "$TAURI_BUNDLE_IDENTIFIER" \
+            '.productName = $name | .identifier = $id' \
+            src-tauri/tauri.conf.json.bak > src-tauri/tauri.conf.json
+          
+          echo "✅ Updated tauri.conf.json:"
+          echo "  - Product Name: $TAURI_PRODUCT_NAME"
+          echo "  - Bundle ID: $TAURI_BUNDLE_IDENTIFIER"
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Backstage68 ${{ steps.env.outputs.environment }} ${{ github.ref_name }}'
+          releaseBody: |
+            🚀 **Backstage68 - ${{ steps.env.outputs.environment }} 环境**
+            
+            构建信息:
+            - 环境: ${{ steps.env.outputs.environment }}
+            - 平台: ${{ matrix.platform.name }}
+            - 提交: ${{ github.sha }}
+            - 分支: ${{ github.ref }}
+            
+            下载对应平台的安装包即可使用。
+          releaseDraft: true
+          prerelease: ${{ steps.env.outputs.environment != 'prod' }}
+          args: --target ${{ matrix.platform.target }}
+
+      - name: Restore tauri.conf.json
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "src-tauri/tauri.conf.json.bak" ]; then
+            mv src-tauri/tauri.conf.json.bak src-tauri/tauri.conf.json
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: backstage68-${{ steps.env.outputs.environment }}-${{ matrix.platform.target }}
+          path: |
+            src-tauri/target/${{ matrix.platform.target }}/release/bundle/**/*
+            !src-tauri/target/${{ matrix.platform.target }}/release/bundle/**/._*
+          retention-days: 7
+
+  # 构建完成后的通知任务（可选）
+  notify:
+    needs: build
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Build Status
+        run: |
+          if [ "${{ needs.build.result }}" == "success" ]; then
+            echo "✅ 所有平台构建成功！"
+          else
+            echo "❌ 构建失败，请检查日志"
+            exit 1
+          fi
+
