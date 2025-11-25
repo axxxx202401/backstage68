@@ -241,11 +241,57 @@
   const MAX_ZOOM = 3.0;
   const ZOOM_STEP = 0.1;
 
+  // 创建缩放提示 UI
+  let zoomIndicator = null;
+  let zoomTimeout = null;
+
+  function createZoomIndicator() {
+    if (!zoomIndicator) {
+      zoomIndicator = document.createElement('div');
+      zoomIndicator.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: rgba(0, 0, 0, 0.6);
+        color: white;
+        padding: 12px 24px;
+        border-radius: 8px;
+        font-size: 24px;
+        font-weight: bold;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        z-index: 999999;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      `;
+      document.body.appendChild(zoomIndicator);
+    }
+    return zoomIndicator;
+  }
+
+  function showZoomIndicator(zoom) {
+    const indicator = createZoomIndicator();
+    indicator.textContent = `${Math.round(zoom * 100)}%`;
+    indicator.style.opacity = '1';
+
+    // 清除之前的定时器
+    if (zoomTimeout) {
+      clearTimeout(zoomTimeout);
+    }
+
+    // 1 秒后隐藏
+    zoomTimeout = setTimeout(() => {
+      indicator.style.opacity = '0';
+    }, 1000);
+  }
+
   // 应用缩放
   async function applyZoom(zoom) {
     try {
       await invoke('set_zoom', { zoomLevel: zoom });
       currentZoom = zoom;
+      showZoomIndicator(zoom);
       log(`🔍 缩放: ${Math.round(zoom * 100)}%`);
     } catch (err) {
       console.error("缩放失败:", err);
