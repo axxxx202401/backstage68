@@ -65,7 +65,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # 检查环境配置文件
-ENV_FILE="env.${ENV}"
+ENV_FILE=".env.${ENV}"
 if [ ! -f "$ENV_FILE" ]; then
     echo -e "${RED}错误: 环境配置文件 ${ENV_FILE} 不存在${NC}"
     exit 1
