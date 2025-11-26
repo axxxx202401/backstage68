@@ -447,13 +447,91 @@
   }, true);
 
 
+  // ======================================
+  // 窗口标题同步（跟随页面标题变化）
+  // ======================================
+  
+  // 获取环境名称（异步）
+  let envName = 'Backstage68';
+  
+  // 异步获取环境名称
+  (async function initEnvName() {
+    try {
+      const envInfo = await invoke('get_env_info');
+      // envInfo 格式: "当前环境: 测试环境 (test_key)"
+      const match = envInfo.match(/当前环境: (.+?) \(/);
+      if (match) {
+        envName = match[1]; // 提取 "测试环境"
+        console.log('✅ 环境名称:', envName);
+      }
+    } catch (err) {
+      console.log('⚠️ 无法获取环境名称，使用默认值');
+    }
+  })();
+  
+  // 更新窗口标题的函数
+  async function updateWindowTitle() {
+    try {
+      const pageTitle = document.title || '未命名页面';
+      const newTitle = `${pageTitle} - ${envName}`;
+      
+      console.log('📝 尝试更新窗口标题:', newTitle);
+      
+      // 使用 Tauri 命令设置窗口标题
+      await invoke('set_window_title', { title: newTitle });
+      
+      log(`✅ 窗口标题已更新: ${newTitle}`);
+    } catch (err) {
+      console.error('❌ Failed to update window title:', err);
+    }
+  }
+  
+  // 监听 document.title 变化
+  const titleObserver = new MutationObserver(() => {
+    console.log('🔔 检测到标题变化:', document.title);
+    updateWindowTitle();
+  });
+  
+  // 开始监听 <title> 标签
+  const titleElement = document.querySelector('title');
+  if (titleElement) {
+    titleObserver.observe(titleElement, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    });
+    console.log('👀 开始监听页面标题变化');
+    log('👀 开始监听页面标题变化');
+  }
+  
+  // 初始化时更新一次标题
+  if (document.readyState === 'complete') {
+    setTimeout(updateWindowTitle, 500);
+  } else {
+    window.addEventListener('load', () => {
+      setTimeout(updateWindowTitle, 500);
+    });
+  }
+  
+  // 路由变化时也更新标题（适配 SPA）
+  let lastUrl = window.location.href;
+  setInterval(() => {
+    const currentUrl = window.location.href;
+    if (currentUrl !== lastUrl) {
+      lastUrl = currentUrl;
+      console.log('🔄 路由变化，等待标题更新...');
+      setTimeout(updateWindowTitle, 300); // 延迟等待前端更新标题
+    }
+  }, 500);
+
   // 添加全局提示
   console.log('🪟 多窗口功能已启用:');
   console.log('  - Cmd+N: 复制当前页面到新窗口');
   console.log('  - Cmd+点击: 复制当前页面到新窗口');
+  console.log('  - 窗口标题: 自动跟随页面标题变化');
   console.log('  - 控制台调用: window.tauriOpenNewWindow(url)');
   
-  log("🪟 多窗口功能已启用");
+  log("🪟 多窗口功能已启用（含标题同步）");
 
 })();
 

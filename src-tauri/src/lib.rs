@@ -75,6 +75,12 @@ async fn get_zoom() -> Result<f64, String> {
     Ok(1.0)
 }
 
+// 设置窗口标题
+#[tauri::command]
+async fn set_window_title(window: tauri::Window, title: String) -> Result<(), String> {
+    window.set_title(&title).map_err(|e| e.to_string())
+}
+
 // 创建新窗口（用于支持多窗口）
 // current_url: 当前页面的 URL（包括路由路径）
 // storage_data: 序列化的 localStorage 和 sessionStorage 数据
@@ -241,6 +247,7 @@ pub fn run() {
             get_env_info,
             set_zoom,
             get_zoom,
+            set_window_title,
             create_new_window
         ])
         .run(tauri::generate_context!())
