@@ -5,6 +5,7 @@ use tokio::sync::Mutex;
 mod proxy;
 mod fingerprint;
 mod crypto;
+mod security;
 
 use proxy::AppState;
 
@@ -93,6 +94,13 @@ async fn get_zoom() -> Result<f64, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 🛡️ 启动时进行安全检查
+    let security_score = security::calculate_security_score();
+    log!("🛡️  Application Security Score: {}/100", security_score.score);
+    log!("   - Debugger detected: {}", security_score.is_debugger);
+    log!("   - VM detected: {}", security_score.is_vm);
+    log!("   - Security level: {:?}", security_score.level());
+
     let client = reqwest::Client::builder()
         .cookie_store(true)
         .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 TauriApp/1.0")
