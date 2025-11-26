@@ -237,9 +237,9 @@
   // 页面缩放功能
   // ======================================
   let currentZoom = 1.0;
-  const MIN_ZOOM = 0.5;
-  const MAX_ZOOM = 3.0;
-  const ZOOM_STEP = 0.1;
+  const MIN_ZOOM = 0.25;   // 25%
+  const MAX_ZOOM = 5.0;    // 500%
+  const ZOOM_STEP = 0.05;  // 5%
 
   // 创建缩放提示 UI
   let zoomIndicator = null;

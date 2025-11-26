@@ -47,34 +47,17 @@ fn get_env_info() -> Result<String, String> {
     Ok(format!("当前环境: {} ({})", ENV_NAME, ENV_KEY))
 }
 
-// 设置页面缩放（使用 CSS transform）
+// 设置页面缩放（使用 CSS zoom 属性，类似浏览器原生缩放）
 #[tauri::command]
 async fn set_zoom(window: tauri::Window, zoom_level: f64) -> Result<(), String> {
     let script = format!(
         r#"
         (function() {{
-            let body = document.body;
-            if (!body) {{
-                document.addEventListener('DOMContentLoaded', function() {{
-                    document.body.style.transform = 'scale({})';
-                    document.body.style.transformOrigin = 'top left';
-                    document.body.style.width = '{}%';
-                    document.body.style.height = '{}%';
-                }});
-            }} else {{
-                body.style.transform = 'scale({})';
-                body.style.transformOrigin = 'top left';
-                body.style.width = '{}%';
-                body.style.height = '{}%';
-            }}
+            // 使用 CSS zoom 属性，这样可以真正缩放页面，而不仅仅是视觉变化
+            document.body.style.zoom = '{}';
         }})();
         "#,
-        zoom_level,
-        100.0 / zoom_level,
-        100.0 / zoom_level,
-        zoom_level,
-        100.0 / zoom_level,
-        100.0 / zoom_level
+        zoom_level
     );
     
     // 获取窗口的主 webview 并执行脚本
