@@ -68,14 +68,65 @@
     }
 
     // Prepare Body
-    // Note: Handling FormData, Blob, etc. requires serialization (e.g. base64)
-    // For this MVP, we handle string/JSON bodies.
+    // 支持 FormData、String、JSON 等多种格式
     let body = null;
+    let formData = null;
+    let files = null;
+    
     if (init && init.body) {
       if (typeof init.body === 'string') {
         body = init.body;
+      } else if (init.body instanceof FormData) {
+        // 处理 FormData：提取字段和文件
+        log("📦 检测到 FormData，开始解析...");
+        
+        formData = [];
+        files = [];
+        
+        // 遍历 FormData
+        for (const [key, value] of init.body.entries()) {
+          if (value instanceof File) {
+            // 文件：转为 base64
+            log(`   文件字段: ${key} = ${value.name} (${value.type}, ${value.size} bytes)`);
+            
+            // 读取文件为 base64（使用 Promise）
+            const reader = new FileReader();
+            const filePromise = new Promise((resolve) => {
+              reader.onload = () => {
+                const base64 = reader.result.split(',')[1]; // 去掉 data:xxx;base64, 前缀
+                const fileObj = {
+                  field_name: key,
+                  file_name: value.name,
+                  content_type: value.type || 'application/octet-stream',
+                  data: base64
+                };
+                files.push(fileObj);
+                log(`   ✅ 文件读取完成: ${key}, base64 长度: ${base64.length}`);
+                resolve();
+              };
+              reader.onerror = () => {
+                console.error(`   ❌ 文件读取失败: ${key}`);
+                resolve();
+              };
+            });
+            reader.readAsDataURL(value);
+            await filePromise; // 等待文件读取完成
+            
+          } else {
+            // 普通字段
+            log(`   表单字段: ${key} = ${value}`);
+            formData.push([key, value.toString()]);
+          }
+        }
+        
+        log(`✅ FormData 解析完成: ${formData.length} 个字段, ${files.length} 个文件`);
+        
+        // 移除 Content-Type，让 Rust 自动设置 multipart boundary
+        delete headers['Content-Type'];
+        delete headers['content-type'];
+        
       } else {
-        // TODO: Handle other body types if needed
+        // 其他类型尝试 JSON 序列化
         try {
            body = JSON.stringify(init.body);
         } catch(e) {
@@ -88,7 +139,9 @@
       method: (init && init.method) ? init.method.toUpperCase() : 'GET',
       url: url.toString(),
       headers: headers,
-      body: body
+      body: body,
+      form_data: formData,
+      files: files.length > 0 ? files : null
     };
 
     log("📤 Request Data:", reqData.method, reqData.url);
@@ -185,14 +238,98 @@
       return;
     }
     
-    const reqData = {
+    // 处理 FormData（文件上传）- 走代理
+    const self = this;
+    let reqData;
+    
+    if (data instanceof FormData) {
+      log("📦 [XHR] 检测到 FormData，转换后走代理");
+      
+      // 异步处理 FormData
+      (async () => {
+        try {
+          const formDataArray = [];
+          const filesArray = [];
+          
+          // 遍历 FormData，提取字段和文件
+          for (const [key, value] of data.entries()) {
+            if (value instanceof File) {
+              // 文件：读取为 base64
+              log(`   文件字段: ${key} = ${value.name} (${value.size} bytes)`);
+              
+              const base64 = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const result = reader.result.split(',')[1]; // 去掉 data:xxx;base64, 前缀
+                  resolve(result);
+                };
+                reader.onerror = () => reject(reader.error);
+                reader.readAsDataURL(value);
+              });
+              
+              filesArray.push({
+                field_name: key,
+                file_name: value.name,
+                content_type: value.type || 'application/octet-stream',
+                data: base64
+              });
+              
+              log(`   ✅ 文件读取完成: ${key}, base64 长度: ${base64.length}`);
+              
+            } else {
+              // 普通字段
+              log(`   表单字段: ${key} = ${value}`);
+              formDataArray.push([key, value.toString()]);
+            }
+          }
+          
+          log(`✅ FormData 解析完成: ${formDataArray.length} 个字段, ${filesArray.length} 个文件`);
+          
+          // 构建请求数据
+          reqData = {
+            method: self.method,
+            url: url,
+            headers: self.headers,
+            body: null,
+            form_data: formDataArray.length > 0 ? formDataArray : null,
+            files: filesArray.length > 0 ? filesArray : null
+          };
+          
+          // 移除 Content-Type，让 Rust 自动设置
+          delete reqData.headers['Content-Type'];
+          delete reqData.headers['content-type'];
+          
+          // 调用 Rust 代理
+          log("🚀 [XHR] 通过代理发送 FormData...");
+          const response = await invoke('proxy_request', { request: reqData });
+          
+          // 设置响应
+          self.status = response.status;
+          self.statusText = response.status === 200 ? "OK" : "";
+          self.responseText = response.body;
+          self.response = response.body;
+          self.readyState = 4;
+          self.responseHeaders = response.headers;
+          
+          if (self.onreadystatechange) self.onreadystatechange();
+          if (self.onload) self.onload();
+          
+        } catch (err) {
+          console.error("XHR FormData Proxy Error:", err);
+          if (self.onerror) self.onerror(err);
+        }
+      })();
+      
+      return;
+    }
+    
+    // 普通请求走代理
+    reqData = {
       method: this.method,
       url: url,
       headers: this.headers,
       body: data ? data.toString() : null
     };
-
-    const self = this;
     
     invoke('proxy_request', { request: reqData })
       .then(response => {

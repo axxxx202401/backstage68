@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use crate::fingerprint::get_device_fingerprint;
 use crate::crypto::{encrypt_signature, generate_signature_data};
+use base64::{Engine as _, engine::general_purpose};
 
 // 编译时判断是否启用日志（使用字节比较避免 const 限制）
 #[cfg(debug_assertions)]
@@ -32,11 +33,21 @@ pub struct AppState {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct FormDataFile {
+    pub field_name: String,
+    pub file_name: String,
+    pub content_type: String,
+    pub data: String, // base64 encoded
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ProxyRequest {
     pub method: String,
     pub url: String,
     pub headers: HashMap<String, String>,
-    pub body: Option<String>, // Text body or base64 for binary? Simplified to string/json for now.
+    pub body: Option<String>, // Text body for JSON/text requests
+    pub form_data: Option<Vec<(String, String)>>, // 表单字段：[(key, value), ...]
+    pub files: Option<Vec<FormDataFile>>, // 文件数据
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -111,8 +122,46 @@ pub async fn proxy_request(
     log!("   X-Timestamp: {}", timestamp);
     log!("   X-Device-Fingerprint: {}", device_fingerprint);
 
-    // 4. Set body
-    if let Some(body) = &request.body {
+    // 4. Set body (优先处理 multipart，其次是普通 body)
+    if let Some(files) = &request.files {
+        // 文件上传请求，使用 multipart/form-data
+        log!("\n📦 文件上传请求，构建 multipart/form-data");
+        log!("   文件数量: {}", files.len());
+        
+        let mut form = reqwest::multipart::Form::new();
+        
+        // 添加普通表单字段
+        if let Some(form_data) = &request.form_data {
+            for (key, value) in form_data {
+                log!("   表单字段: {} = {}", key, value);
+                form = form.text(key.clone(), value.clone());
+            }
+        }
+        
+        // 添加文件
+        for file in files {
+            log!("   文件: {} ({})", file.file_name, file.content_type);
+            
+            // 解码 base64 文件数据
+            let file_bytes = base64::engine::general_purpose::STANDARD
+                .decode(&file.data)
+                .map_err(|e| format!("Failed to decode file: {}", e))?;
+            
+            log!("   文件大小: {} bytes", file_bytes.len());
+            
+            // 创建文件部分
+            let part = reqwest::multipart::Part::bytes(file_bytes)
+                .file_name(file.file_name.clone())
+                .mime_str(&file.content_type)
+                .map_err(|e| format!("Invalid content type: {}", e))?;
+            
+            form = form.part(file.field_name.clone(), part);
+        }
+        
+        req_builder = req_builder.multipart(form);
+        
+    } else if let Some(body) = &request.body {
+        // 普通请求体（JSON、文本等）
         log!("\n📦 请求体: {} bytes", body.len());
         req_builder = req_builder.body(body.clone());
     }
