@@ -363,5 +363,97 @@
 
   log("🔍 页面缩放功能已启用");
 
+  // ======================================
+  // 多窗口支持
+  // ======================================
+  
+  // 序列化存储数据（用于跨窗口传递）
+  function serializeStorage() {
+    const data = {
+      localStorage: {},
+      sessionStorage: {}
+    };
+    
+    // 复制 localStorage
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      data.localStorage[key] = localStorage.getItem(key);
+    }
+    
+    // 复制 sessionStorage
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      data.sessionStorage[key] = sessionStorage.getItem(key);
+    }
+    
+    console.log('📦 Serialized storage:', data);
+    return data;
+  }
+  
+  // 创建新窗口（打开当前页面，并复制登录状态）
+  window.tauriOpenNewWindow = async function(url) {
+    try {
+      // 如果没有传入 URL，使用当前页面的完整 URL
+      const targetUrl = url || window.location.href;
+      log(`🪟 准备打开新窗口: ${targetUrl}`);
+      console.log('🪟 Current URL:', window.location.href);
+      console.log('🪟 Target URL:', targetUrl);
+      
+      // 序列化当前窗口的存储数据
+      const storageData = serializeStorage();
+      
+      // 创建新窗口（先打开首页，等待存储复制完成后再跳转）
+      const windowLabel = await invoke('create_new_window', { 
+        currentUrl: targetUrl,
+        storageData: JSON.stringify(storageData)
+      });
+      
+      log(`✅ 新窗口已创建: ${windowLabel}`);
+      console.log('✅ Window created:', windowLabel);
+      return windowLabel;
+    } catch (err) {
+      console.error("❌ 创建窗口失败:", err);
+      log(`❌ Error: ${err}`);
+      throw err;
+    }
+  };
+
+  // 快捷键：Cmd+N 创建新窗口（打开当前页面）
+  // 使用 capture 阶段确保优先捕获
+  document.addEventListener('keydown', (e) => {
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const isCtrlOrCmd = isMac ? e.metaKey : e.ctrlKey;
+    
+    if (isCtrlOrCmd && e.key === 'n') {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('🔥 Cmd+N triggered, current URL:', window.location.href);
+      window.tauriOpenNewWindow(); // 打开当前页面
+    }
+  }, true); // 使用 capture 阶段
+
+  // Cmd+点击 = 在新窗口打开当前页面（简化版，适配 Vue Router）
+  // 因为前端使用 Vue Router，没有真正的 <a> 标签，所以 Cmd+点击任意地方都打开当前页面
+  document.addEventListener('click', (e) => {
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const isCtrlOrCmd = isMac ? e.metaKey : e.ctrlKey;
+    
+    if (isCtrlOrCmd) {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('🔥 Cmd+Click detected, opening current page in new window');
+      window.tauriOpenNewWindow(); // 打开当前页面
+    }
+  }, true);
+
+
+  // 添加全局提示
+  console.log('🪟 多窗口功能已启用:');
+  console.log('  - Cmd+N: 复制当前页面到新窗口');
+  console.log('  - Cmd+点击: 复制当前页面到新窗口');
+  console.log('  - 控制台调用: window.tauriOpenNewWindow(url)');
+  
+  log("🪟 多窗口功能已启用");
+
 })();
 

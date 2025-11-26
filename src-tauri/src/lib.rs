@@ -75,6 +75,98 @@ async fn get_zoom() -> Result<f64, String> {
     Ok(1.0)
 }
 
+// 创建新窗口（用于支持多窗口）
+// current_url: 当前页面的 URL（包括路由路径）
+// storage_data: 序列化的 localStorage 和 sessionStorage 数据
+#[tauri::command]
+async fn create_new_window(
+    app: tauri::AppHandle, 
+    current_url: Option<String>,
+    storage_data: Option<String>
+) -> Result<String, String> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    
+    // 生成唯一的窗口 ID
+    static WINDOW_COUNTER: AtomicUsize = AtomicUsize::new(1);
+    let window_id = WINDOW_COUNTER.fetch_add(1, Ordering::SeqCst);
+    let window_label = format!("window-{}", window_id);
+    
+    log!("🪟 Creating new window: {}", window_label);
+    
+    // 使用传入的 URL（当前页面）或默认 URL
+    let target_url = current_url.unwrap_or_else(|| ENV_URL.to_string());
+    log!("   Target URL: {}", target_url);
+    
+    // 获取注入脚本
+    let inject_script = include_str!("../../src/inject.js");
+    
+    // 构建初始化脚本：先恢复存储，再跳转到目标 URL
+    let storage_restore_script = if let Some(data) = storage_data {
+        format!(
+            r#"
+            (function() {{
+                try {{
+                    const storageData = JSON.parse('{}');
+                    console.log('🔄 Restoring storage data:', storageData);
+                    
+                    // 恢复 localStorage
+                    if (storageData.localStorage) {{
+                        for (const [key, value] of Object.entries(storageData.localStorage)) {{
+                            localStorage.setItem(key, value);
+                        }}
+                        console.log('✅ localStorage restored:', Object.keys(storageData.localStorage).length, 'items');
+                    }}
+                    
+                    // 恢复 sessionStorage
+                    if (storageData.sessionStorage) {{
+                        for (const [key, value] of Object.entries(storageData.sessionStorage)) {{
+                            sessionStorage.setItem(key, value);
+                        }}
+                        console.log('✅ sessionStorage restored:', Object.keys(storageData.sessionStorage).length, 'items');
+                    }}
+                    
+                    // 存储恢复完成后，跳转到目标 URL
+                    console.log('🔄 Navigating to:', '{}');
+                    window.location.href = '{}';
+                }} catch (err) {{
+                    console.error('❌ Failed to restore storage:', err);
+                    // 即使失败也跳转
+                    window.location.href = '{}';
+                }}
+            }})();
+            "#,
+            data.replace('\\', "\\\\").replace('\'', "\\'"),
+            target_url.replace('\'', "\\'"),
+            target_url.replace('\'', "\\'"),
+            target_url.replace('\'', "\\'")
+        )
+    } else {
+        String::new()
+    };
+    
+    let final_script = format!(
+        "window.__TAURI_ENABLE_LOGS__ = {};\n{}\n{}", 
+        ENABLE_LOGS,
+        inject_script,
+        storage_restore_script
+    );
+    
+    // 新窗口先打开首页（用于恢复存储）
+    let initial_url = ENV_URL.to_string();
+    
+    let _window = WebviewWindowBuilder::new(
+        &app,
+        &window_label,
+        WebviewUrl::External(initial_url.parse().map_err(|e| format!("Invalid URL: {}", e))?)
+    )
+    .title(format!("{} - 窗口 {}", ENV_NAME, window_id))
+    .initialization_script(&final_script)
+    .build()
+    .map_err(|e| format!("Failed to create window: {}", e))?;
+    
+    Ok(window_label)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // 🛡️ 启动时进行安全检查
@@ -101,7 +193,7 @@ pub fn run() {
     Builder::default()
         .manage(app_state)
         .setup(move |app| {
-            log!("🚀 Creating window...");
+            log!("🚀 Creating main window...");
             
             // 准备注入脚本：将 inject.js 内容和目标 URL 变量合并
             let target_url = ENV_URL.to_string();
@@ -111,7 +203,7 @@ pub fn run() {
                 inject_script
             );
 
-            // 创建窗口
+            // 创建主窗口（使用固定 label "main"）
             let window = WebviewWindowBuilder::new(
                 app,
                 "main",
@@ -148,7 +240,8 @@ pub fn run() {
             proxy::proxy_request,
             get_env_info,
             set_zoom,
-            get_zoom
+            get_zoom,
+            create_new_window
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
