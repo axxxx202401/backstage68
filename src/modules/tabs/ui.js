@@ -7,7 +7,8 @@ const TAB_CONFIG = {
   tabBarHeight: 40,
   minTabWidth: 40,
   maxTabWidth: 200,
-  defaultTabWidth: 200
+  defaultTabWidth: 200,
+  enableCloseButton: true
 };
 
 // 创建标签栏
