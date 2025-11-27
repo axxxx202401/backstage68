@@ -126,10 +126,9 @@ async fn create_new_window(
     // 获取注入脚本
     let inject_script = include_str!("../../src/inject.js");
 
-    // 构建初始化脚本：先恢复存储，再跳转到目标 URL
+    // 构建初始化脚本：恢复存储（不跳转）
     let storage_restore_script = if let Some(data) = storage_data {
         let escaped_data = escape_js_string(&data);
-        let escaped_url = escape_js_string(&target_url);
 
         format!(
             r#"
@@ -154,17 +153,13 @@ async fn create_new_window(
                         console.log('✅ sessionStorage restored:', Object.keys(storageData.sessionStorage).length, 'items');
                     }}
                     
-                    // 存储恢复完成后，跳转到目标 URL
-                    console.log('🔄 Navigating to:', '{}');
-                    window.location.href = '{}';
+                    console.log('✅ Storage restoration complete');
                 }} catch (err) {{
                     console.error('❌ Failed to restore storage:', err);
-                    // 即使失败也跳转
-                    window.location.href = '{}';
                 }}
             }})();
             "#,
-            escaped_data, escaped_url, escaped_url, escaped_url
+            escaped_data
         )
     } else {
         String::new()
@@ -175,8 +170,8 @@ async fn create_new_window(
         ENABLE_LOGS, inject_script, storage_restore_script
     );
 
-    // 新窗口先打开首页（用于恢复存储）
-    let initial_url = ENV_URL.to_string();
+    // 新窗口直接打开目标 URL（不是首页）
+    let initial_url = target_url.clone();
 
     let _window = WebviewWindowBuilder::new(
         &app,
