@@ -154,6 +154,27 @@ export function initProxy(log, invoke) {
     try {
       const response = await invoke('proxy_request', { request: reqData });
       
+      // 如果有调试信息，在控制台打印（类似 Network 面板）
+      if (response.debug_info) {
+        const debug = response.debug_info;
+        console.groupCollapsed(
+          `%c${debug.request_method} %c${debug.response_status} %c${debug.request_url}`,
+          'color: #0066cc; font-weight: bold',
+          debug.response_status >= 200 && debug.response_status < 300 ? 'color: #00cc00; font-weight: bold' : 'color: #cc0000; font-weight: bold',
+          'color: #666'
+        );
+        console.log('📍 Request URL:', debug.request_url);
+        console.log('🔧 Request Method:', debug.request_method);
+        console.log('📤 Request Headers:', debug.request_headers);
+        if (debug.request_body) {
+          console.log('📦 Request Body:', debug.request_body.substring(0, 500));
+        }
+        console.log('📊 Response Status:', debug.response_status);
+        console.log('📥 Response Headers:', debug.response_headers);
+        console.log('📄 Response Body:', response.body.substring(0, 500));
+        console.groupEnd();
+      }
+      
       if (response.status === 403) {
         log.error("⚠️ 403 Forbidden!");
       }
@@ -265,6 +286,27 @@ export function initProxy(log, invoke) {
           
           const response = await invoke('proxy_request', { request: reqData });
           
+          // 打印调试信息
+          if (response.debug_info) {
+            const debug = response.debug_info;
+            console.groupCollapsed(
+              `%c${debug.request_method} %c${debug.response_status} %c${debug.request_url}`,
+              'color: #0066cc; font-weight: bold',
+              debug.response_status >= 200 && debug.response_status < 300 ? 'color: #00cc00; font-weight: bold' : 'color: #cc0000; font-weight: bold',
+              'color: #666'
+            );
+            console.log('📍 Request URL:', debug.request_url);
+            console.log('🔧 Request Method:', debug.request_method);
+            console.log('📤 Request Headers:', debug.request_headers);
+            if (debug.request_body) {
+              console.log('📦 Request Body:', debug.request_body.substring(0, 500));
+            }
+            console.log('📊 Response Status:', debug.response_status);
+            console.log('📥 Response Headers:', debug.response_headers);
+            console.log('📄 Response Body:', response.body.substring(0, 500));
+            console.groupEnd();
+          }
+          
           self.status = response.status;
           self.statusText = response.status === 200 ? "OK" : "";
           self.responseText = response.body;
@@ -292,6 +334,27 @@ export function initProxy(log, invoke) {
     
     invoke('proxy_request', { request: reqData })
       .then(response => {
+        // 打印调试信息
+        if (response.debug_info) {
+          const debug = response.debug_info;
+          console.groupCollapsed(
+            `%c${debug.request_method} %c${debug.response_status} %c${debug.request_url}`,
+            'color: #0066cc; font-weight: bold',
+            debug.response_status >= 200 && debug.response_status < 300 ? 'color: #00cc00; font-weight: bold' : 'color: #cc0000; font-weight: bold',
+            'color: #666'
+          );
+          console.log('📍 Request URL:', debug.request_url);
+          console.log('🔧 Request Method:', debug.request_method);
+          console.log('📤 Request Headers:', debug.request_headers);
+          if (debug.request_body) {
+            console.log('📦 Request Body:', debug.request_body.substring(0, 500));
+          }
+          console.log('📊 Response Status:', debug.response_status);
+          console.log('📥 Response Headers:', debug.response_headers);
+          console.log('📄 Response Body:', response.body.substring(0, 500));
+          console.groupEnd();
+        }
+        
         self.status = response.status;
         self.statusText = response.status === 200 ? "OK" : "";
         self.responseText = response.body;

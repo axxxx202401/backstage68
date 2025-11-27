@@ -55,6 +55,19 @@ pub struct ProxyResponse {
     pub status: u16,
     pub headers: HashMap<String, String>,
     pub body: String,
+    // 用于开发调试：记录完整的请求信息
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub debug_info: Option<ProxyDebugInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProxyDebugInfo {
+    pub request_method: String,
+    pub request_url: String,
+    pub request_headers: HashMap<String, String>,
+    pub request_body: Option<String>,
+    pub response_status: u16,
+    pub response_headers: HashMap<String, String>,
 }
 
 #[tauri::command]
@@ -179,7 +192,7 @@ pub async fn proxy_request(
     let status = resp.status().as_u16();
     log!("📥 响应状态: {}", status);
 
-    let headers = resp
+    let headers: HashMap<String, String> = resp
         .headers()
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
@@ -203,9 +216,30 @@ pub async fn proxy_request(
 
     log!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
+    // 在开发模式下，返回调试信息
+    let debug_info = if ENABLE_LOGS {
+        // 收集所有请求头（包括安全头）
+        let mut all_request_headers = request.headers.clone();
+        all_request_headers.insert("X-Client-Signature".to_string(), encrypted_signature.clone());
+        all_request_headers.insert("X-Timestamp".to_string(), timestamp.clone());
+        all_request_headers.insert("X-Device-Fingerprint".to_string(), device_fingerprint.clone());
+        
+        Some(ProxyDebugInfo {
+            request_method: request.method.clone(),
+            request_url: request.url.clone(),
+            request_headers: all_request_headers,
+            request_body: request.body.clone(),
+            response_status: status,
+            response_headers: headers.clone(),
+        })
+    } else {
+        None
+    };
+
     Ok(ProxyResponse {
         status,
         headers,
         body,
+        debug_info,
     })
 }
