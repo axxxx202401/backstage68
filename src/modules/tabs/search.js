@@ -4,8 +4,137 @@
 
 import { activateTab } from './operations.js';
 
+// 初始化搜索样式（只在第一次调用时添加）
+let stylesAdded = false;
+function addSearchStyles() {
+  if (stylesAdded || !document.head) return;
+  stylesAdded = true;
+  
+  const searchStyle = document.createElement('style');
+  searchStyle.textContent = `
+  .tauri-tab-search-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 10000000;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 100px;
+    animation: overlayFadeIn 0.2s ease-out;
+  }
+  @keyframes overlayFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  .tauri-tab-search-dialog {
+    background: #2c2c2c;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.8);
+    border: 1px solid #444;
+    width: 600px;
+    max-width: 90vw;
+    max-height: 500px;
+    display: flex;
+    flex-direction: column;
+    animation: dialogSlideIn 0.3s ease-out;
+    overflow: hidden;
+  }
+  @keyframes dialogSlideIn {
+    from {
+      opacity: 0;
+      transform: translateY(-20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .tauri-tab-search-input {
+    width: 100%;
+    padding: 16px 20px;
+    background: #1e1e1e;
+    border: none;
+    border-bottom: 1px solid #444;
+    color: #e0e0e0;
+    font-size: 16px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    outline: none;
+    border-radius: 12px 12px 0 0;
+    box-sizing: border-box;
+  }
+  .tauri-tab-search-input:focus {
+    background: #252525;
+    border-bottom-color: #0066cc;
+  }
+  .tauri-tab-search-input::placeholder {
+    color: #888;
+  }
+  .tauri-tab-search-results {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+    min-height: 100px;
+  }
+  .tauri-tab-search-results::-webkit-scrollbar {
+    width: 8px;
+  }
+  .tauri-tab-search-results::-webkit-scrollbar-track {
+    background: #2c2c2c;
+  }
+  .tauri-tab-search-results::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 4px;
+  }
+  .tauri-tab-search-results::-webkit-scrollbar-thumb:hover {
+    background: #666;
+  }
+  .tauri-tab-search-item {
+    padding: 12px 20px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transition: background 0.15s;
+  }
+  .tauri-tab-search-item:hover {
+    background: rgba(255,255,255,0.1);
+  }
+  .tauri-tab-search-item.selected {
+    background: rgba(0,102,204,0.3);
+  }
+  .tauri-tab-search-item-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+  .tauri-tab-search-item-content {
+    flex: 1;
+    min-width: 0;
+  }
+  .tauri-tab-search-item-title {
+    color: #e0e0e0;
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tauri-tab-search-empty {
+    padding: 40px 20px;
+    text-align: center;
+    color: #888;
+    font-size: 14px;
+  }
+`;
+  document.head.appendChild(searchStyle);
+}
+
 // 显示标签搜索对话框
 export function showTabSearch() {
+  addSearchStyles(); // 确保样式已添加
+  
   const log = window.tauriTabs.log;
   log('🔍 打开标签搜索');
   
@@ -134,125 +263,4 @@ export function showTabSearch() {
   // 自动聚焦
   setTimeout(() => input.focus(), 100);
 }
-
-// 添加搜索样式
-const searchStyle = document.createElement('style');
-searchStyle.textContent = `
-  .tauri-tab-search-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0,0,0,0.7);
-    z-index: 10000000;
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    padding-top: 100px;
-    animation: overlayFadeIn 0.2s ease-out;
-  }
-  @keyframes overlayFadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-  .tauri-tab-search-dialog {
-    background: #2c2c2c;
-    border-radius: 12px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.8);
-    border: 1px solid #444;
-    width: 600px;
-    max-width: 90vw;
-    max-height: 500px;
-    display: flex;
-    flex-direction: column;
-    animation: dialogSlideIn 0.3s ease-out;
-    overflow: hidden;
-  }
-  @keyframes dialogSlideIn {
-    from {
-      opacity: 0;
-      transform: translateY(-20px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-  .tauri-tab-search-input {
-    width: 100%;
-    padding: 16px 20px;
-    background: #1e1e1e;
-    border: none;
-    border-bottom: 1px solid #444;
-    color: #e0e0e0;
-    font-size: 16px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    outline: none;
-    border-radius: 12px 12px 0 0;
-    box-sizing: border-box;
-  }
-  .tauri-tab-search-input:focus {
-    background: #252525;
-    border-bottom-color: #0066cc;
-  }
-  .tauri-tab-search-input::placeholder {
-    color: #888;
-  }
-  .tauri-tab-search-results {
-    flex: 1;
-    overflow-y: auto;
-    padding: 8px 0;
-    min-height: 100px;
-  }
-  .tauri-tab-search-results::-webkit-scrollbar {
-    width: 8px;
-  }
-  .tauri-tab-search-results::-webkit-scrollbar-track {
-    background: #2c2c2c;
-  }
-  .tauri-tab-search-results::-webkit-scrollbar-thumb {
-    background: #555;
-    border-radius: 4px;
-  }
-  .tauri-tab-search-results::-webkit-scrollbar-thumb:hover {
-    background: #666;
-  }
-  .tauri-tab-search-item {
-    padding: 12px 20px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    transition: background 0.15s;
-  }
-  .tauri-tab-search-item:hover {
-    background: rgba(255,255,255,0.1);
-  }
-  .tauri-tab-search-item.selected {
-    background: rgba(0,102,204,0.3);
-  }
-  .tauri-tab-search-item-icon {
-    font-size: 20px;
-    flex-shrink: 0;
-  }
-  .tauri-tab-search-item-content {
-    flex: 1;
-    min-width: 0;
-  }
-  .tauri-tab-search-item-title {
-    color: #e0e0e0;
-    font-size: 14px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .tauri-tab-search-empty {
-    padding: 40px 20px;
-    text-align: center;
-    color: #888;
-    font-size: 14px;
-  }
-`;
-document.head.appendChild(searchStyle);
 

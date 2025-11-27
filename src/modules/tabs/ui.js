@@ -63,6 +63,10 @@ export function createTabBar() {
 
 // 创建样式
 function createStyles() {
+  if (!document.head) {
+    console.warn('document.head 不可用，延迟创建样式');
+    return;
+  }
   const style = document.createElement('style');
   style.textContent = `
     .tauri-tabs-container::-webkit-scrollbar { display: none; }

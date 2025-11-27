@@ -1,4 +1,11 @@
 name: Build Tauri App
+# 
+# 构建流程说明：
+# 1. Install frontend dependencies - 安装 npm 依赖（包括 Rollup）
+# 2. Build inject.js - 从模块化源码构建 inject.js
+# 3. Build Tauri app - 构建 Tauri 应用
+#
+# 注意：inject.js 已重构为模块化代码，需要先用 Rollup 打包
 
 on:
   push:
@@ -78,6 +85,13 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci
+
+      - name: Build inject.js (from modular source)
+        run: |
+          echo "🔨 Building inject.js from modules..."
+          npm run build
+          echo "✅ inject.js build complete"
+          ls -lh src/inject.js
 
       - name: Determine build environment
         id: env

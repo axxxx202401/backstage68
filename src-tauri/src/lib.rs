@@ -40,7 +40,7 @@ macro_rules! log {
 const DEVTOOLS_ENABLED: bool = true;
 
 #[cfg(not(debug_assertions))]
-const DEVTOOLS_ENABLED: bool = true; // 强制在生产环境开启，用于调试
+const DEVTOOLS_ENABLED: bool = true; // 临时强制开启调试
 
 #[tauri::command]
 fn get_env_info() -> Result<String, String> {

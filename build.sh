@@ -85,6 +85,16 @@ echo "   访问地址: $TAURI_ENV_URL"
 echo "   开发工具: $TAURI_DEVTOOLS_ENABLED"
 echo ""
 
+# 构建 inject.js（重要：确保使用最新的模块化代码）
+echo -e "${YELLOW}🔨 构建 inject.js...${NC}"
+npm run build
+if [ $? -ne 0 ]; then
+    echo -e "${RED}❌ inject.js 构建失败${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✅ inject.js 构建成功${NC}"
+echo ""
+
 # 开发模式或打包模式
 if [ "$DEV_MODE" = true ]; then
     echo -e "${YELLOW}🚀 启动开发模式...${NC}"

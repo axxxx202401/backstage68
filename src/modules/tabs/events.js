@@ -9,6 +9,27 @@ export function initTabEvents() {
   setupKeyboardShortcuts();
   setupDragEvents();
   window.tauriTabs.showContextMenu = showTabContextMenu;
+  
+  // 添加上下文菜单样式
+  if (document.head) {
+    const contextMenuStyle = document.createElement('style');
+    contextMenuStyle.textContent = `
+      .tauri-tab-context-menu {
+        animation: menuFadeIn 0.15s ease-out;
+      }
+      @keyframes menuFadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(-4px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+    `;
+    document.head.appendChild(contextMenuStyle);
+  }
 }
 
 // 键盘快捷键
@@ -231,23 +252,4 @@ function showTabContextMenu(tabId, x, y) {
     });
   }, 100);
 }
-
-// 添加上下文菜单样式
-const contextMenuStyle = document.createElement('style');
-contextMenuStyle.textContent = `
-  .tauri-tab-context-menu {
-    animation: menuFadeIn 0.15s ease-out;
-  }
-  @keyframes menuFadeIn {
-    from {
-      opacity: 0;
-      transform: translateY(-4px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-`;
-document.head.appendChild(contextMenuStyle);
 

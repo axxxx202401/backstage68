@@ -7,11 +7,15 @@
   "scripts": {
     "build": "rollup -c",
     "watch": "rollup -c -w",
-    "build:prod": "NODE_ENV=production rollup -c"
+    "build:prod": "NODE_ENV=production rollup -c",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "devDependencies": {
     "@rollup/plugin-node-resolve": "^15.2.3",
     "@rollup/plugin-terser": "^0.4.4",
+    "@tauri-apps/cli": "^2.1.0",
     "rollup": "^4.9.4"
   },
   "engines": {
