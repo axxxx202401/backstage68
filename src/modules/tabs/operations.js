@@ -58,6 +58,35 @@ export function createIframeContainer() {
 }
 
 // 创建 iframe
+function inheritIframeProxy(iframe, log) {
+  const MAX_ATTEMPTS = 5;
+  let attempt = 0;
+
+  function applyProxy() {
+    attempt++;
+    try {
+      const iframeWindow = iframe.contentWindow;
+      if (!iframeWindow) {
+        throw new Error('contentWindow 不可用');
+      }
+      iframeWindow.fetch = window.fetch;
+      iframeWindow.XMLHttpRequest = window.XMLHttpRequest;
+      log(`✅ iframe 已继承父窗口的代理 (第 ${attempt} 次尝试)`);
+      return true;
+    } catch (err) {
+      if (attempt < MAX_ATTEMPTS) {
+        log(`⏳ iframe 代理未就绪，准备重试 (${attempt}/${MAX_ATTEMPTS})`);
+        setTimeout(applyProxy, 100 * attempt);
+      } else {
+        log(`⚠️  无法设置 iframe 代理: ${err.message}`);
+      }
+      return false;
+    }
+  }
+
+  applyProxy();
+}
+
 export function createIframe(url, log) {
   const container = document.querySelector('.tauri-iframe-container') || createIframeContainer();
   
@@ -69,23 +98,16 @@ export function createIframe(url, log) {
   
   // iframe 加载完成后，设置代理和事件监听
   iframe.addEventListener('load', () => {
+    inheritIframeProxy(iframe, log);
     try {
-      const iframeWindow = iframe.contentWindow;
       const iframeDoc = iframe.contentDocument;
-      
-      if (iframeWindow && iframeDoc && window.self === window.top) {
-        // 用父窗口的代理替换 iframe 的 fetch 和 XHR
-        iframeWindow.fetch = window.fetch;
-        iframeWindow.XMLHttpRequest = window.XMLHttpRequest;
-        log(`✅ iframe 已继承父窗口的代理`);
-        
+      if (iframeDoc && window.self === window.top) {
         // 在 iframe 内部添加键盘事件监听器
         setupIframeEvents(iframeDoc, log);
-        
         log(`✅ iframe 事件监听器已安装`);
       }
     } catch (err) {
-      log(`⚠️  无法设置 iframe: ${err.message}`);
+      log(`⚠️  处理 iframe 事件失败: ${err.message}`);
     }
   });
   
