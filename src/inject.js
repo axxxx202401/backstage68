@@ -11,15 +11,34 @@
   
   log("🚀 Tauri Proxy Injection Started");
 
-  // Access Tauri invoke function (Tauri v2)
-  if (!window.__TAURI__ || !window.__TAURI__.core || !window.__TAURI__.core.invoke) {
-    console.error("❌ Tauri API not available! Proxy will not work.");
-    return;
+  // 检查是否在 iframe 内部
+  const isInIframe = window.self !== window.top;
+  
+  // 如果在 iframe 内，不初始化代理，让父窗口处理
+  if (isInIframe) {
+    log("⚠️  检测到在 iframe 内，跳过代理初始化，使用父窗口代理");
+    // 不 return，继续执行后面的代码（窗口标题同步等）
+    
+    // 但是我们需要一个假的 invoke 函数，避免后续代码报错
+    const invoke = async (...args) => {
+      throw new Error("在 iframe 内不应该直接调用 invoke");
+    };
   }
   
-  const invoke = window.__TAURI__.core.invoke;
-  log("✅ Tauri API ready, proxy enabled");
+  // 在顶层窗口，初始化 Tauri API
+  let invoke;
+  if (!isInIframe) {
+    if (!window.__TAURI__ || !window.__TAURI__.core || !window.__TAURI__.core.invoke) {
+      console.error("❌ Tauri API not available! Proxy will not work.");
+      return;
+    }
+    invoke = window.__TAURI__.core.invoke;
+    log("✅ Tauri API ready, proxy enabled");
+  }
 
+  // 只在顶层窗口安装代理拦截器
+  if (!isInIframe) {
+    
   // --- Override window.fetch ---
   const originalFetch = window.fetch;
   
@@ -369,6 +388,8 @@
   // Replace global XHR
   window.XMLHttpRequest = ProxyXHR;
   log("✅ Tauri Proxy Injection Completed");
+  
+  } // 结束 if (!isInIframe) 代理安装块
 
   // ======================================
   // 页面缩放功能
@@ -423,13 +444,38 @@
     }, 1000);
   }
 
-  // 应用缩放
+  // 应用缩放（作用于当前激活的标签或当前页面）
   async function applyZoom(zoom) {
     try {
-      await invoke('set_zoom', { zoomLevel: zoom });
       currentZoom = zoom;
+      // 同步到全局状态
+      if (window.tauriTabs) {
+        window.tauriTabs.currentZoom = zoom;
+      }
       showZoomIndicator(zoom);
-      log(`🔍 缩放: ${Math.round(zoom * 100)}%`);
+      
+      // 如果在顶层窗口且标签页系统已初始化，缩放当前激活的 iframe
+      if (window.self === window.top && window.tauriTabs && window.tauriTabs.activeTabId) {
+        const activeTab = window.tauriTabs.tabs.find(t => t.id === window.tauriTabs.activeTabId);
+        if (activeTab && activeTab.iframe) {
+          try {
+            const iframeDoc = activeTab.iframe.contentDocument || activeTab.iframe.contentWindow.document;
+            if (iframeDoc && iframeDoc.body) {
+              iframeDoc.body.style.zoom = zoom;
+              log(`🔍 iframe 缩放: ${Math.round(zoom * 100)}%`);
+              return; // 成功，直接返回
+            }
+          } catch (e) {
+            log(`⚠️  无法直接访问 iframe，尝试其他方式: ${e.message}`);
+          }
+        }
+      }
+      
+      // 如果在 iframe 内部，或者无法访问 iframe，直接缩放当前页面
+      if (document.body) {
+        document.body.style.zoom = zoom;
+        log(`🔍 页面缩放: ${Math.round(zoom * 100)}%`);
+      }
     } catch (err) {
       console.error("缩放失败:", err);
     }
@@ -460,17 +506,53 @@
     // Ctrl/Cmd + Plus/Equal (放大)
     if (ctrlKey && (e.key === '+' || e.key === '=')) {
       e.preventDefault();
-      await zoomIn();
+      
+      // 如果在 iframe 内，通知父窗口执行缩放
+      if (window.self !== window.top) {
+        try {
+          if (window.parent.tauriZoom && window.parent.tauriZoom.zoomIn) {
+            await window.parent.tauriZoom.zoomIn();
+          }
+        } catch (err) {
+          log("⚠️  无法调用父窗口缩放:", err);
+        }
+      } else {
+        await zoomIn();
+      }
     }
     // Ctrl/Cmd + Minus (缩小)
     else if (ctrlKey && e.key === '-') {
       e.preventDefault();
-      await zoomOut();
+      
+      // 如果在 iframe 内，通知父窗口执行缩放
+      if (window.self !== window.top) {
+        try {
+          if (window.parent.tauriZoom && window.parent.tauriZoom.zoomOut) {
+            await window.parent.tauriZoom.zoomOut();
+          }
+        } catch (err) {
+          log("⚠️  无法调用父窗口缩放:", err);
+        }
+      } else {
+        await zoomOut();
+      }
     }
     // Ctrl/Cmd + 0 (重置)
     else if (ctrlKey && e.key === '0') {
       e.preventDefault();
-      await zoomReset();
+      
+      // 如果在 iframe 内，通知父窗口执行缩放
+      if (window.self !== window.top) {
+        try {
+          if (window.parent.tauriZoom && window.parent.tauriZoom.reset) {
+            await window.parent.tauriZoom.reset();
+          }
+        } catch (err) {
+          log("⚠️  无法调用父窗口缩放:", err);
+        }
+      } else {
+        await zoomReset();
+      }
     }
   });
 
@@ -481,10 +563,28 @@
 
     if (ctrlKey) {
       e.preventDefault();
-      if (e.deltaY < 0) {
-        await zoomIn();
+      
+      // 如果在 iframe 内，通知父窗口执行缩放
+      if (window.self !== window.top) {
+        try {
+          if (e.deltaY < 0) {
+            if (window.parent.tauriZoom && window.parent.tauriZoom.zoomIn) {
+              await window.parent.tauriZoom.zoomIn();
+            }
+          } else {
+            if (window.parent.tauriZoom && window.parent.tauriZoom.zoomOut) {
+              await window.parent.tauriZoom.zoomOut();
+            }
+          }
+        } catch (err) {
+          log("⚠️  无法调用父窗口缩放:", err);
+        }
       } else {
-        await zoomOut();
+        if (e.deltaY < 0) {
+          await zoomIn();
+        } else {
+          await zoomOut();
+        }
       }
     }
   }, { passive: false });
@@ -669,6 +769,934 @@
   console.log('  - 控制台调用: window.tauriOpenNewWindow(url)');
   
   log("🪟 多窗口功能已启用（含标题同步）");
+
+  // ======================================
+  // 标签页功能（Browser-like Tabs）
+  // ======================================
+  
+  // 配置
+  const TAB_CONFIG = {
+    maxTabs: 20,
+    tabBarHeight: 40,
+    enableCloseButton: true
+  };
+  
+  // 标签页管理器（全局）
+  window.tauriTabs = {
+    tabs: [],
+    activeTabId: null,
+    tabCounter: 0,
+    currentZoom: 1.0 // 添加缩放状态
+  };
+  
+  // 创建标签栏容器
+  function createTabBar() {
+    const tabBar = document.createElement('div');
+    tabBar.id = 'tauri-tab-bar';
+    tabBar.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: ${TAB_CONFIG.tabBarHeight}px;
+      background: linear-gradient(180deg, #3a3a3a 0%, #2c2c2c 100%);
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      z-index: 999999;
+      user-select: none;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      overflow-x: auto;
+      overflow-y: hidden;
+      gap: 4px;
+    `;
+    
+    // 隐藏滚动条但保持可滚动
+    tabBar.style.scrollbarWidth = 'none'; // Firefox
+    tabBar.style.msOverflowStyle = 'none'; // IE
+    const style = document.createElement('style');
+    style.textContent = `
+      #tauri-tab-bar::-webkit-scrollbar { display: none; }
+      .tauri-tab {
+        min-width: 150px;
+        max-width: 200px;
+        height: 30px;
+        background: rgba(255,255,255,0.05);
+        border-radius: 6px 6px 0 0;
+        display: flex;
+        align-items: center;
+        padding: 0 12px;
+        cursor: pointer;
+        transition: background 0.2s;
+        flex-shrink: 0;
+        position: relative;
+      }
+      .tauri-tab:hover {
+        background: rgba(255,255,255,0.1);
+      }
+      .tauri-tab.active {
+        background: rgba(255,255,255,0.15);
+        box-shadow: 0 -2px 0 0 #0066cc inset;
+      }
+      .tauri-tab-title {
+        flex: 1;
+        color: #e0e0e0;
+        font-size: 13px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .tauri-tab.active .tauri-tab-title {
+        color: #ffffff;
+      }
+      .tauri-tab-close {
+        margin-left: 8px;
+        color: #999;
+        font-size: 18px;
+        line-height: 1;
+        width: 16px;
+        height: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 3px;
+        flex-shrink: 0;
+      }
+      .tauri-tab-close:hover {
+        background: rgba(255,255,255,0.2);
+        color: #fff;
+      }
+      .tauri-new-tab {
+        min-width: 32px;
+        width: 32px;
+        height: 30px;
+        background: rgba(255,255,255,0.05);
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: background 0.2s;
+        color: #e0e0e0;
+        font-size: 20px;
+        flex-shrink: 0;
+        margin-left: 4px;
+      }
+      .tauri-new-tab:hover {
+        background: rgba(255,255,255,0.15);
+      }
+      .tauri-iframe-container {
+        position: fixed;
+        top: ${TAB_CONFIG.tabBarHeight}px;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        height: calc(100vh - ${TAB_CONFIG.tabBarHeight}px);
+      }
+      .tauri-tab-iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+        display: none;
+      }
+      .tauri-tab-iframe.active {
+        display: block;
+      }
+      .tauri-tab.dragging {
+        opacity: 0.5;
+        cursor: grabbing;
+      }
+      .tauri-tab.drag-over {
+        background: rgba(255,255,255,0.25);
+        border-left: 2px solid #0066cc;
+      }
+      .tauri-tab-context-menu {
+        animation: menuFadeIn 0.15s ease-out;
+      }
+      @keyframes menuFadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(-4px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+    `;
+    document.head.appendChild(style);
+    
+    document.body.appendChild(tabBar);
+    
+    // 添加新建标签按钮
+    const newTabBtn = document.createElement('div');
+    newTabBtn.className = 'tauri-new-tab';
+    newTabBtn.innerHTML = '+';
+    newTabBtn.title = '新建标签 (Cmd+T)';
+    newTabBtn.addEventListener('click', () => {
+      createTab(window.location.href);
+    });
+    tabBar.appendChild(newTabBtn);
+    
+    return tabBar;
+  }
+  
+  // 创建标签按钮
+  function createTabElement(id, title) {
+    const tab = document.createElement('div');
+    tab.className = 'tauri-tab';
+    tab.dataset.tabId = id;
+    tab.setAttribute('draggable', 'true'); // 允许拖动（使用 setAttribute 更明确）
+    
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'tauri-tab-title';
+    titleSpan.textContent = title || '新标签页';
+    tab.appendChild(titleSpan);
+    
+    if (TAB_CONFIG.enableCloseButton) {
+      const closeBtn = document.createElement('span');
+      closeBtn.className = 'tauri-tab-close';
+      closeBtn.innerHTML = '×';
+      closeBtn.title = '关闭标签 (Cmd+W)';
+      closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeTab(id);
+      });
+      tab.appendChild(closeBtn);
+    }
+    
+    tab.addEventListener('click', () => switchTab(id));
+    
+    // 右键菜单
+    tab.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showTabContextMenu(id, e.clientX, e.clientY);
+    });
+    
+    // 拖动事件
+    tab.addEventListener('dragstart', (e) => {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', id);
+      tab.style.opacity = '0.5';
+      tab.classList.add('dragging');
+      log(`🖱️ 开始拖动标签: ${id}`);
+    });
+    
+    tab.addEventListener('dragend', (e) => {
+      tab.style.opacity = '1';
+      tab.classList.remove('dragging');
+      // 移除所有 dragover 高亮
+      document.querySelectorAll('.tauri-tab.drag-over').forEach(t => {
+        t.classList.remove('drag-over');
+      });
+      log(`🖱️ 结束拖动标签: ${id}`);
+    });
+    
+    tab.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      // 添加视觉反馈
+      if (!tab.classList.contains('dragging')) {
+        tab.classList.add('drag-over');
+      }
+    });
+    
+    tab.addEventListener('dragleave', (e) => {
+      tab.classList.remove('drag-over');
+    });
+    
+    tab.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      tab.classList.remove('drag-over');
+      
+      const draggedId = e.dataTransfer.getData('text/plain');
+      if (draggedId && draggedId !== id) {
+        log(`📍 放置标签: ${draggedId} -> ${id}`);
+        reorderTabs(draggedId, id);
+      }
+    });
+    
+    return tab;
+  }
+  
+  // 显示标签右键菜单
+  function showTabContextMenu(tabId, x, y) {
+    // 移除旧菜单
+    const oldMenu = document.querySelector('.tauri-tab-context-menu');
+    if (oldMenu) oldMenu.remove();
+    
+    const menu = document.createElement('div');
+    menu.className = 'tauri-tab-context-menu';
+    menu.style.cssText = `
+      position: fixed;
+      left: ${x}px;
+      top: ${y}px;
+      background: rgba(30, 30, 30, 0.95);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      padding: 6px;
+      z-index: 9999999;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 13px;
+      min-width: 180px;
+      color: white;
+    `;
+    
+    const menuItems = [
+      { text: '🔄 刷新', action: () => refreshTab(tabId) },
+      { text: '📋 复制标签', action: () => duplicateTab(tabId) },
+      { text: '🪟 在新窗口打开', action: () => openTabInNewWindow(tabId) },
+      { divider: true },
+      { text: '❌ 关闭', action: () => closeTab(tabId) },
+      { text: '⬅️ 关闭左侧标签', action: () => closeTabsToLeft(tabId) },
+      { text: '➡️ 关闭右侧标签', action: () => closeTabsToRight(tabId) },
+      { text: '🗑️ 关闭其他标签', action: () => closeOtherTabs(tabId) }
+    ];
+    
+    menuItems.forEach(item => {
+      if (item.divider) {
+        const divider = document.createElement('div');
+        divider.style.cssText = `
+          height: 1px;
+          background: rgba(255, 255, 255, 0.1);
+          margin: 4px 0;
+        `;
+        menu.appendChild(divider);
+      } else {
+        const menuItem = document.createElement('div');
+        menuItem.textContent = item.text;
+        menuItem.style.cssText = `
+          padding: 8px 12px;
+          cursor: pointer;
+          border-radius: 4px;
+          transition: background 0.15s;
+        `;
+        menuItem.addEventListener('mouseenter', () => {
+          menuItem.style.background = 'rgba(255, 255, 255, 0.1)';
+        });
+        menuItem.addEventListener('mouseleave', () => {
+          menuItem.style.background = 'transparent';
+        });
+        menuItem.addEventListener('click', () => {
+          item.action();
+          menu.remove();
+        });
+        menu.appendChild(menuItem);
+      }
+    });
+    
+    document.body.appendChild(menu);
+    
+    // 点击其他地方关闭菜单（包括 iframe 内部）
+    setTimeout(() => {
+      const closeMenu = (e) => {
+        if (!menu.contains(e.target)) {
+          menu.remove();
+          // 移除所有监听器
+          document.removeEventListener('click', closeMenu, true);
+          document.removeEventListener('contextmenu', closeMenu, true);
+          
+          // 移除所有 iframe 的监听器
+          window.tauriTabs.tabs.forEach(tab => {
+            try {
+              const iframeDoc = tab.iframe.contentDocument;
+              if (iframeDoc) {
+                iframeDoc.removeEventListener('click', closeMenu, true);
+                iframeDoc.removeEventListener('contextmenu', closeMenu, true);
+              }
+            } catch (err) {
+              // 忽略跨域错误
+            }
+          });
+        }
+      };
+      
+      // 在顶层 document 添加监听器
+      document.addEventListener('click', closeMenu, true);
+      document.addEventListener('contextmenu', closeMenu, true);
+      
+      // 在所有 iframe 的 document 添加监听器
+      window.tauriTabs.tabs.forEach(tab => {
+        try {
+          const iframeDoc = tab.iframe.contentDocument;
+          if (iframeDoc) {
+            iframeDoc.addEventListener('click', closeMenu, true);
+            iframeDoc.addEventListener('contextmenu', closeMenu, true);
+          }
+        } catch (err) {
+          // 忽略跨域错误
+        }
+      });
+    }, 100); // 延迟稍微久一点，确保当前右键事件已处理完
+  }
+  
+  // 重新排序标签
+  function reorderTabs(draggedId, targetId) {
+    const tabs = window.tauriTabs.tabs;
+    const draggedIndex = tabs.findIndex(t => t.id === draggedId);
+    const targetIndex = tabs.findIndex(t => t.id === targetId);
+    
+    if (draggedIndex === -1 || targetIndex === -1) return;
+    
+    // 移动数组中的位置
+    const [draggedTab] = tabs.splice(draggedIndex, 1);
+    tabs.splice(targetIndex, 0, draggedTab);
+    
+    // 更新 DOM
+    const tabBar = document.getElementById('tauri-tab-bar');
+    const newTabBtn = tabBar.querySelector('.tauri-new-tab');
+    
+    // 清空标签栏（保留新建按钮）
+    Array.from(tabBar.children).forEach(child => {
+      if (!child.classList.contains('tauri-new-tab')) {
+        child.remove();
+      }
+    });
+    
+    // 按新顺序添加标签
+    tabs.forEach(tab => {
+      tabBar.insertBefore(tab.element, newTabBtn);
+    });
+    
+    log(`🔄 标签重新排序: ${draggedId} 移动到 ${targetId} 附近`);
+  }
+  
+  // 刷新标签
+  function refreshTab(tabId) {
+    const tab = window.tauriTabs.tabs.find(t => t.id === tabId);
+    if (!tab) return;
+    
+    log(`🔄 刷新标签: ${tabId}`);
+    tab.iframe.src = tab.iframe.src; // 重新加载
+  }
+  
+  // 复制标签
+  function duplicateTab(tabId) {
+    const tab = window.tauriTabs.tabs.find(t => t.id === tabId);
+    if (!tab) return;
+    
+    const tabs = window.tauriTabs.tabs;
+    
+    if (tabs.length >= TAB_CONFIG.maxTabs) {
+      alert(`最多只能打开 ${TAB_CONFIG.maxTabs} 个标签`);
+      return;
+    }
+    
+    log(`📋 复制标签: ${tabId}, URL: ${tab.url}`);
+    
+    // 尝试获取当前 iframe 的实际 URL（可能因为 SPA 路由变化）
+    let currentUrl = tab.url;
+    try {
+      const iframeWindow = tab.iframe.contentWindow;
+      if (iframeWindow && iframeWindow.location && iframeWindow.location.href) {
+        currentUrl = iframeWindow.location.href;
+        log(`   使用 iframe 当前 URL: ${currentUrl}`);
+      }
+    } catch (err) {
+      log(`   无法获取 iframe 当前 URL，使用原始 URL: ${tab.url}`);
+    }
+    
+    // 创建新标签，使用当前 URL
+    createTab(currentUrl);
+  }
+  
+  // 在新窗口打开标签
+  async function openTabInNewWindow(tabId) {
+    const tab = window.tauriTabs.tabs.find(t => t.id === tabId);
+    if (!tab) return;
+    
+    log(`🪟 在新窗口打开: ${tab.url}`);
+    try {
+      await invoke('create_new_window', { 
+        currentUrl: tab.url,
+        storageData: null // 新窗口会自动复制 localStorage
+      });
+    } catch (err) {
+      console.error('Failed to open new window:', err);
+    }
+  }
+  
+  // 关闭左侧标签
+  function closeTabsToLeft(tabId) {
+    const tabs = window.tauriTabs.tabs;
+    const index = tabs.findIndex(t => t.id === tabId);
+    
+    if (index <= 0) return;
+    
+    log(`⬅️ 关闭左侧 ${index} 个标签`);
+    
+    // 从右往左关闭，避免索引变化
+    for (let i = index - 1; i >= 0; i--) {
+      closeTab(tabs[i].id);
+    }
+  }
+  
+  // 关闭右侧标签
+  function closeTabsToRight(tabId) {
+    const tabs = window.tauriTabs.tabs;
+    const index = tabs.findIndex(t => t.id === tabId);
+    
+    if (index === -1 || index === tabs.length - 1) return;
+    
+    const count = tabs.length - index - 1;
+    log(`➡️ 关闭右侧 ${count} 个标签`);
+    
+    // 从右往左关闭
+    for (let i = tabs.length - 1; i > index; i--) {
+      closeTab(tabs[i].id);
+    }
+  }
+  
+  // 关闭其他标签
+  function closeOtherTabs(tabId) {
+    const tabs = window.tauriTabs.tabs;
+    const tabsToClose = tabs.filter(t => t.id !== tabId);
+    
+    log(`🗑️ 关闭其他 ${tabsToClose.length} 个标签`);
+    
+    tabsToClose.forEach(tab => closeTab(tab.id));
+  }
+  
+  // 创建 iframe
+  function createIframe(url) {
+    const container = document.querySelector('.tauri-iframe-container') || createIframeContainer();
+    
+    const iframe = document.createElement('iframe');
+    iframe.className = 'tauri-tab-iframe';
+    iframe.src = url;
+    
+    container.appendChild(iframe);
+    
+    // iframe 加载完成后，设置代理和事件监听
+    iframe.addEventListener('load', () => {
+      try {
+        const iframeWindow = iframe.contentWindow;
+        const iframeDoc = iframe.contentDocument;
+        
+        if (iframeWindow && iframeDoc && window.self === window.top) {
+          // 1. 用父窗口的代理替换 iframe 的 fetch 和 XHR
+          iframeWindow.fetch = window.fetch;
+          iframeWindow.XMLHttpRequest = window.XMLHttpRequest;
+          log(`✅ iframe 已继承父窗口的代理`);
+          
+          // 2. 在 iframe 内部添加键盘事件监听器，转发到父窗口处理
+          iframeDoc.addEventListener('keydown', (e) => {
+            const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+            const isCtrlOrCmd = isMac ? e.metaKey : e.ctrlKey;
+            
+            if (!isCtrlOrCmd) return;
+            
+            // 缩放快捷键
+            if (e.key === '+' || e.key === '=') {
+              e.preventDefault();
+              if (window.tauriZoom && window.tauriZoom.zoomIn) {
+                window.tauriZoom.zoomIn();
+              }
+            } else if (e.key === '-') {
+              e.preventDefault();
+              if (window.tauriZoom && window.tauriZoom.zoomOut) {
+                window.tauriZoom.zoomOut();
+              }
+            } else if (e.key === '0') {
+              e.preventDefault();
+              if (window.tauriZoom && window.tauriZoom.reset) {
+                window.tauriZoom.reset();
+              }
+            }
+            
+            // 标签页快捷键（需要检查是否已初始化）
+            if (window.tauriTabs && window.tauriTabs.tabs) {
+              if (e.key === 't') {
+                e.preventDefault();
+                const activeTab = window.tauriTabs.tabs.find(t => t.id === window.tauriTabs.activeTabId);
+                const currentUrl = activeTab ? activeTab.url : window.location.href;
+                if (typeof createTab === 'function') {
+                  createTab(currentUrl);
+                }
+              } else if (e.key === 'w' && window.tauriTabs.tabs.length > 1) {
+                e.preventDefault();
+                if (window.tauriTabs.activeTabId && typeof closeTab === 'function') {
+                  closeTab(window.tauriTabs.activeTabId);
+                }
+              } else if (e.key >= '1' && e.key <= '9') {
+                e.preventDefault();
+                const index = parseInt(e.key) - 1;
+                if (index < window.tauriTabs.tabs.length && typeof switchTab === 'function') {
+                  switchTab(window.tauriTabs.tabs[index].id);
+                }
+              }
+            }
+          }, true); // 使用 capture 阶段
+          
+          // 3. 鼠标滚轮缩放
+          iframeDoc.addEventListener('wheel', (e) => {
+            const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+            const isCtrlOrCmd = isMac ? e.metaKey : e.ctrlKey;
+            
+            if (isCtrlOrCmd) {
+              e.preventDefault();
+              if (e.deltaY < 0) {
+                if (window.tauriZoom && window.tauriZoom.zoomIn) {
+                  window.tauriZoom.zoomIn();
+                }
+              } else {
+                if (window.tauriZoom && window.tauriZoom.zoomOut) {
+                  window.tauriZoom.zoomOut();
+                }
+              }
+            }
+          }, { passive: false, capture: true });
+          
+          log(`✅ iframe 事件监听器已安装`);
+        }
+      } catch (err) {
+        log(`⚠️  无法设置 iframe: ${err.message}`);
+      }
+    });
+    
+    return iframe;
+  }
+  
+  // 创建 iframe 容器
+  function createIframeContainer() {
+    const container = document.createElement('div');
+    container.className = 'tauri-iframe-container';
+    document.body.appendChild(container);
+    return container;
+  }
+  
+  // 创建新标签
+  function createTab(url) {
+    const tabs = window.tauriTabs.tabs;
+    
+    if (tabs.length >= TAB_CONFIG.maxTabs) {
+      alert(`最多只能打开 ${TAB_CONFIG.maxTabs} 个标签`);
+      return;
+    }
+    
+    const id = 'tab-' + (++window.tauriTabs.tabCounter);
+    const title = '加载中...';
+    
+    log(`📑 创建新标签: ${id}, URL: ${url}`);
+    
+    const tabElement = createTabElement(id, title);
+    const iframe = createIframe(url);
+    
+    const tabBar = document.getElementById('tauri-tab-bar');
+    const newTabBtn = tabBar.querySelector('.tauri-new-tab');
+    tabBar.insertBefore(tabElement, newTabBtn);
+    
+    const tabData = {
+      id,
+      url,
+      title,
+      element: tabElement,
+      iframe
+    };
+    
+    tabs.push(tabData);
+    
+    // 监听 iframe 加载完成，更新标题并应用缩放
+    iframe.addEventListener('load', () => {
+      try {
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+        const newTitle = iframeDoc.title || url;
+        updateTabTitle(id, newTitle);
+        
+        log(`📄 iframe 加载完成，标题: ${newTitle}`);
+        
+        // 监听 iframe 内标题的变化（SPA 应用会动态改变标题）
+        const titleElement = iframeDoc.querySelector('title');
+        if (titleElement) {
+          const observer = new MutationObserver(() => {
+            const updatedTitle = iframeDoc.title;
+            if (updatedTitle && updatedTitle !== tabData.title) {
+              log(`📝 检测到标题变化: ${updatedTitle}`);
+              updateTabTitle(id, updatedTitle);
+            }
+          });
+          observer.observe(titleElement, { 
+            subtree: true, 
+            characterData: true, 
+            childList: true 
+          });
+          
+          // 保存 observer 以便后续清理
+          tabData.titleObserver = observer;
+        }
+        
+        // 定期检查标题（兜底方案）
+        const titleCheckInterval = setInterval(() => {
+          try {
+            const currentTitle = iframeDoc.title;
+            if (currentTitle && currentTitle !== tabData.title) {
+              log(`🔄 定期检查发现标题变化: ${currentTitle}`);
+              updateTabTitle(id, currentTitle);
+            }
+          } catch (err) {
+            // iframe 可能已被销毁
+            clearInterval(titleCheckInterval);
+          }
+        }, 1000);
+        
+        // 保存 interval 以便后续清理
+        tabData.titleCheckInterval = titleCheckInterval;
+        
+        // 应用当前缩放级别
+        const zoomLevel = window.tauriTabs.currentZoom || currentZoom || 1.0;
+        if (zoomLevel !== 1.0 && iframeDoc.body) {
+          iframeDoc.body.style.zoom = zoomLevel;
+          log(`🔍 应用缩放 ${Math.round(zoomLevel * 100)}% 到新标签`);
+        }
+      } catch (e) {
+        // 跨域无法访问，使用 URL
+        updateTabTitle(id, url);
+        log(`⚠️  无法访问 iframe 内容 (可能跨域)`);
+      }
+    });
+    
+    switchTab(id);
+    return id;
+  }
+  
+  // 切换标签
+  function switchTab(id) {
+    const tabs = window.tauriTabs.tabs;
+    const tab = tabs.find(t => t.id === id);
+    
+    if (!tab) return;
+    
+    log(`🔄 切换到标签: ${id}`);
+    
+    tabs.forEach(t => {
+      if (t.id === id) {
+        t.element.classList.add('active');
+        t.iframe.classList.add('active');
+      } else {
+        t.element.classList.remove('active');
+        t.iframe.classList.remove('active');
+      }
+    });
+    
+    window.tauriTabs.activeTabId = id;
+    
+    // 更新窗口标题
+    if (tab.title) {
+      updateMainWindowTitle(tab.title);
+    }
+    
+    // 应用当前缩放级别到新激活的 iframe
+    const zoomLevel = window.tauriTabs.currentZoom || currentZoom || 1.0;
+    if (zoomLevel !== 1.0) {
+      setTimeout(() => {
+        try {
+          const iframeDoc = tab.iframe.contentDocument || tab.iframe.contentWindow.document;
+          if (iframeDoc && iframeDoc.body) {
+            iframeDoc.body.style.zoom = zoomLevel;
+            log(`🔍 切换标签后应用缩放: ${Math.round(zoomLevel * 100)}%`);
+          }
+        } catch (e) {
+          log(`⚠️  无法应用缩放到 iframe: ${e.message}`);
+        }
+      }, 100); // 延迟一点，确保 iframe 已加载
+    }
+  }
+  
+  // 关闭标签
+  function closeTab(id) {
+    const tabs = window.tauriTabs.tabs;
+    const index = tabs.findIndex(t => t.id === id);
+    
+    if (index === -1) return;
+    
+    // 如果是最后一个标签，不允许关闭
+    if (tabs.length === 1) {
+      log('⚠️  不能关闭最后一个标签');
+      return;
+    }
+    
+    log(`❌ 关闭标签: ${id}`);
+    
+    const tab = tabs[index];
+    
+    // 清理观察器和定时器
+    if (tab.titleObserver) {
+      tab.titleObserver.disconnect();
+    }
+    if (tab.titleCheckInterval) {
+      clearInterval(tab.titleCheckInterval);
+    }
+    
+    tab.element.remove();
+    tab.iframe.remove();
+    tabs.splice(index, 1);
+    
+    // 如果关闭的是当前标签，切换到相邻标签
+    if (id === window.tauriTabs.activeTabId) {
+      const newIndex = Math.min(index, tabs.length - 1);
+      switchTab(tabs[newIndex].id);
+    }
+  }
+  
+  // 更新标签标题
+  function updateTabTitle(id, title) {
+    const tab = window.tauriTabs.tabs.find(t => t.id === id);
+    if (!tab) {
+      log(`⚠️  updateTabTitle: 找不到标签 ${id}`);
+      return;
+    }
+    
+    // 避免重复更新
+    if (tab.title === title) return;
+    
+    tab.title = title;
+    const titleSpan = tab.element.querySelector('.tauri-tab-title');
+    if (titleSpan) {
+      titleSpan.textContent = title;
+      titleSpan.title = title; // 悬停显示完整标题
+      log(`✅ 标签标题已更新: ${id} -> ${title}`);
+    } else {
+      log(`⚠️  找不到标题元素: ${id}`);
+    }
+    
+    // 如果是当前激活标签，更新窗口标题
+    if (id === window.tauriTabs.activeTabId) {
+      updateMainWindowTitle(title);
+    }
+  }
+  
+  // 更新主窗口标题
+  async function updateMainWindowTitle(title) {
+    try {
+      await invoke('set_window_title', { title: `${title} - 测试环境` });
+    } catch (err) {
+      console.error('Failed to update window title:', err);
+    }
+  }
+  
+  // 键盘快捷键（仅在顶层窗口监听）
+  if (window.self === window.top) {
+    document.addEventListener('keydown', (e) => {
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const isCtrlOrCmd = isMac ? e.metaKey : e.ctrlKey;
+      
+      if (!isCtrlOrCmd) return;
+      
+      // 检查标签页系统是否已初始化
+      if (!window.tauriTabs || !window.tauriTabs.tabs) return;
+      
+      // Cmd+T: 新建标签
+      if (e.key === 't') {
+        e.preventDefault();
+        e.stopPropagation();
+        // 获取当前激活标签的 URL
+        const activeTab = window.tauriTabs.tabs.find(t => t.id === window.tauriTabs.activeTabId);
+        const currentUrl = activeTab ? activeTab.url : window.location.href;
+        createTab(currentUrl);
+      }
+      
+      // Cmd+W: 关闭当前标签（但不关闭应用）
+      if (e.key === 'w') {
+        // 如果只剩一个标签，不处理（让系统默认行为：什么都不做）
+        if (window.tauriTabs.tabs.length > 1 && window.tauriTabs.activeTabId) {
+          e.preventDefault();
+          e.stopPropagation();
+          closeTab(window.tauriTabs.activeTabId);
+        }
+        // 如果只有一个标签，不阻止默认行为，也不关闭标签
+      }
+      
+      // Cmd+Shift+N: 新窗口（保留多窗口功能）
+      if (e.key === 'N' && e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        const activeTab = window.tauriTabs.tabs.find(t => t.id === window.tauriTabs.activeTabId);
+        const currentUrl = activeTab ? activeTab.url : window.location.href;
+        window.tauriOpenNewWindow(currentUrl);
+      }
+      
+      // Cmd+数字键: 快速切换标签 (1-9)
+      if (e.key >= '1' && e.key <= '9') {
+        e.preventDefault();
+        e.stopPropagation();
+        const index = parseInt(e.key) - 1;
+        const tabs = window.tauriTabs.tabs;
+        if (index < tabs.length) {
+          switchTab(tabs[index].id);
+        }
+      }
+    }, true); // 使用 capture 阶段，优先捕获
+  }
+  
+  // 初始化标签页系统
+  function initTabSystem() {
+    // 检查是否在 iframe 内部
+    if (window.self !== window.top) {
+      log("⚠️  检测到在 iframe 内部，跳过标签页系统初始化");
+      return;
+    }
+    
+    // 检查是否已经初始化过
+    if (window.__TAURI_TABS_INITIALIZED__) {
+      log("⚠️  标签页系统已初始化，跳过");
+      return;
+    }
+    
+    // 等待 DOM 加载完成
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initTabSystem);
+      return;
+    }
+    
+    log("📑 初始化标签页系统...");
+    
+    // 标记已初始化
+    window.__TAURI_TABS_INITIALIZED__ = true;
+    
+    // 创建标签栏
+    createTabBar();
+    
+    // 创建第一个标签，显示当前页面
+    const currentUrl = window.location.href;
+    const firstTabId = createTab(currentUrl);
+    
+    // 隐藏原始 body 内容（除了我们创建的标签栏和 iframe 容器）
+    // 但保留 zoom indicator 等功能性元素
+    Array.from(document.body.children).forEach(child => {
+      if (child.id !== 'tauri-tab-bar' && 
+          !child.classList.contains('tauri-iframe-container') &&
+          !child.id?.includes('zoom')) { // 保留缩放指示器
+        child.style.display = 'none';
+      }
+    });
+    
+    log("✅ 标签页系统初始化完成");
+    console.log("🎉 标签页功能已启用:");
+    console.log("  ╔════════════════════════════════════╗");
+    console.log("  ║  快捷键                            ║");
+    console.log("  ╠════════════════════════════════════╣");
+    console.log("  ║  Cmd+T          新建标签           ║");
+    console.log("  ║  Cmd+W          关闭当前标签       ║");
+    console.log("  ║  Cmd+Shift+N    新窗口（多窗口）   ║");
+    console.log("  ║  Cmd+1~9        切换到第 N 个标签  ║");
+    console.log("  ╠════════════════════════════════════╣");
+    console.log("  ║  鼠标操作                          ║");
+    console.log("  ╠════════════════════════════════════╣");
+    console.log("  ║  拖动标签        重新排序          ║");
+    console.log("  ║  右键标签        显示菜单          ║");
+    console.log("  ║  点击 +          新建标签          ║");
+    console.log("  ╚════════════════════════════════════╝");
+    console.log("  最多支持 20 个标签，拖动排序，右键菜单功能齐全");
+  }
+  
+  // 启动标签页系统（仅在顶层窗口）
+  initTabSystem();
 
 })();
 

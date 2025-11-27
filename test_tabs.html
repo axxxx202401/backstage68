@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>测试页面</title>
+</head>
+<body>
+    <h1>测试页面</h1>
+    <p>检查控制台输出</p>
+    <script>
+        console.log("=== 环境检查 ===");
+        console.log("window.self === window.top:", window.self === window.top);
+        console.log("window.__TAURI__:", !!window.__TAURI__);
+        console.log("window.__TAURI_TABS_INITIALIZED__:", window.__TAURI_TABS_INITIALIZED__);
+        console.log("window.tauriTabs:", window.tauriTabs);
+        console.log("document.getElementById('tauri-tab-bar'):", !!document.getElementById('tauri-tab-bar'));
+        console.log("iframe 数量:", document.querySelectorAll('iframe').length);
+    </script>
+</body>
+</html>
