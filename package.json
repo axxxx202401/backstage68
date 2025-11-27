@@ -1,13 +1,20 @@
 {
-  "name": "tauri-http-wrapper",
-  "version": "0.0.0",
-  "description": "Tauri app to wrap remote site with custom auth",
+  "name": "backstage68-inject",
+  "version": "1.0.0",
+  "description": "Backstage68 inject script - modular version",
+  "private": true,
+  "type": "module",
   "scripts": {
-    "tauri": "tauri"
+    "build": "rollup -c",
+    "watch": "rollup -c -w",
+    "build:prod": "NODE_ENV=production rollup -c"
   },
-  "dependencies": {
-    "@tauri-apps/api": "^2.0.0",
-    "@tauri-apps/cli": "^2.0.0"
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "@rollup/plugin-terser": "^0.4.4",
+    "rollup": "^4.9.4"
+  },
+  "engines": {
+    "node": ">=16"
   }
 }
-

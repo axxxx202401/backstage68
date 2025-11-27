@@ -8,3 +8,11 @@ node_modules
 .idea
 src-tauri/target
 dist-apps/
+
+# Rollup 构建产物（inject.js 是由 inject-refactored.js 生成的）
+# src/inject.js
+# src/inject.js.map
+
+# 备份文件
+src/inject.backup.js
+src/inject.legacy.js
