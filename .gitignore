@@ -3,16 +3,27 @@
 private_key.pem
 # public_key.pem
 
-node_modules
-.history
-.idea
-src-tauri/target
-dist-apps/
+# npm 依赖和构建产物
+node_modules/
+package-lock.json
 
 # Rollup 构建产物（inject.js 是由 inject-refactored.js 生成的）
-# src/inject.js
-# src/inject.js.map
+# ⚠️ 编译生成，不要提交
+src/inject.js
+src/inject.js.map
+
+# Rust 构建产物
+src-tauri/target/
+
+# 打包产物
+dist-apps/
+
+# 开发工具
+.history
+.idea
+.DS_Store
 
 # 备份文件
 src/inject.backup.js
 src/inject.legacy.js
+src/inject.new.js

@@ -87,11 +87,12 @@ jobs:
         run: npm ci
 
       - name: Build inject.js (from modular source)
+        shell: bash
         run: |
           echo "🔨 Building inject.js from modules..."
           npm run build
           echo "✅ inject.js build complete"
-          ls -lh src/inject.js
+          ls -lh src/inject.js 2>/dev/null || dir src/inject.js
 
       - name: Determine build environment
         id: env
