@@ -1,6 +1,6 @@
-use rsa::{RsaPublicKey, Pkcs1v15Encrypt};
+use base64::{engine::general_purpose, Engine as _};
 use rsa::pkcs8::DecodePublicKey;
-use base64::{Engine as _, engine::general_purpose};
+use rsa::{Pkcs1v15Encrypt, RsaPublicKey};
 
 // 编译时判断是否启用日志（使用字节比较避免 const 限制）
 #[cfg(debug_assertions)]
@@ -59,12 +59,16 @@ xwIDAQAB
 /// 根据环境安全评分选择公钥
 fn select_public_key() -> &'static str {
     use crate::security::{calculate_security_score, SecurityLevel};
-    
+
     let score = calculate_security_score();
-    
-    log!("🔒 Security Check - Score: {}, Debugger: {}, VM: {}", 
-        score.score, score.is_debugger, score.is_vm);
-    
+
+    log!(
+        "🔒 Security Check - Score: {}, Debugger: {}, VM: {}",
+        score.score,
+        score.is_debugger,
+        score.is_vm
+    );
+
     match score.level() {
         SecurityLevel::Safe => {
             log!("✅ Environment: SAFE - Using real key");
@@ -85,16 +89,17 @@ fn select_public_key() -> &'static str {
 pub fn encrypt_signature(data: &str) -> Result<String, String> {
     // 动态选择公钥
     let public_key_pem = select_public_key();
-    
+
     // 解析公钥
     let public_key = RsaPublicKey::from_public_key_pem(public_key_pem)
         .map_err(|e| format!("Failed to parse public key: {}", e))?;
-    
+
     // 加密数据
     let mut rng = rand::thread_rng();
-    let encrypted = public_key.encrypt(&mut rng, Pkcs1v15Encrypt, data.as_bytes())
+    let encrypted = public_key
+        .encrypt(&mut rng, Pkcs1v15Encrypt, data.as_bytes())
         .map_err(|e| format!("Failed to encrypt: {}", e))?;
-    
+
     // Base64 编码
     Ok(general_purpose::STANDARD.encode(&encrypted))
 }
@@ -103,12 +108,12 @@ pub fn encrypt_signature(data: &str) -> Result<String, String> {
 /// 格式：timestamp|device_fingerprint|path_hash
 /// 注意：Nginx 会去掉 /base_api 前缀，所以我们也要去掉再哈希
 pub fn generate_signature_data(timestamp: &str, fingerprint: &str, url: &str) -> String {
-    use sha2::{Sha256, Digest};
-    
+    use sha2::{Digest, Sha256};
+
     // 提取路径并去掉 /base_api 前缀（因为 Nginx 会去掉）
     let path_to_hash = if let Some(idx) = url.find("/base_api/") {
         // 找到 /base_api/，取后面的部分（包括开头的 /）
-        &url[idx + 9..]  // "/base_api" 是 9 个字符
+        &url[idx + 9..] // "/base_api" 是 9 个字符
     } else if let Some(_idx) = url.find("/base_api") {
         // 如果是 /base_api 结尾（无斜杠）
         "/"
@@ -116,29 +121,31 @@ pub fn generate_signature_data(timestamp: &str, fingerprint: &str, url: &str) ->
         // 没有 /base_api，直接用原 URL
         url
     };
-    
+
     // 确保以 / 开头
     let final_path = if path_to_hash.starts_with('/') {
         path_to_hash.to_string()
     } else {
         format!("/{}", path_to_hash)
     };
-    
-    log!("   📝 Path for hashing (after removing /base_api): {}", final_path);
-    
+
+    log!(
+        "   📝 Path for hashing (after removing /base_api): {}",
+        final_path
+    );
+
     // URL 解码（Java 的 URI.getPath() 和 getQuery() 会自动解码）
     let decoded_path = urlencoding::decode(&final_path)
         .unwrap_or(std::borrow::Cow::Borrowed(&final_path))
         .to_string();
-    
+
     log!("   📝 Decoded path: {}", decoded_path);
-    
+
     // 路径哈希
     let mut hasher = Sha256::new();
     hasher.update(decoded_path.as_bytes());
     let path_hash = format!("{:x}", hasher.finalize());
-    
+
     // 组合签名数据
     format!("{}|{}|{}", timestamp, fingerprint, &path_hash[..16])
 }
-
