@@ -802,34 +802,84 @@
       background: linear-gradient(180deg, #3a3a3a 0%, #2c2c2c 100%);
       display: flex;
       align-items: center;
-      padding: 0 8px;
+      padding: 0;
       z-index: 999999;
       user-select: none;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-      overflow-x: auto;
-      overflow-y: hidden;
+    `;
+    
+    // 创建标签容器（不滚动，标签自动缩小以适应窗口）
+    const tabsContainer = document.createElement('div');
+    tabsContainer.className = 'tauri-tabs-container';
+    tabsContainer.style.cssText = `
+      flex: 1;
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      overflow: hidden;
       gap: 4px;
     `;
     
+    // 创建控制按钮容器（固定在右侧）
+    const controlsContainer = document.createElement('div');
+    controlsContainer.className = 'tauri-tab-controls-fixed';
+    controlsContainer.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 0 8px;
+      flex-shrink: 0;
+      background: linear-gradient(90deg, rgba(42, 42, 42, 0.8) 0%, #2c2c2c 20%);
+    `;
+    
+    tabBar.appendChild(tabsContainer);
+    tabBar.appendChild(controlsContainer);
+    
+    // 新建按钮（放在标签容器内）
+    const newTabBtn = document.createElement('div');
+    newTabBtn.className = 'tauri-new-tab';
+    newTabBtn.innerHTML = '+';
+    newTabBtn.title = '新建标签 (Cmd+T)';
+    newTabBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      log('➕ 点击新建标签按钮');
+      const activeTab = window.tauriTabs.tabs.find(t => t.id === window.tauriTabs.activeTabId);
+      const currentUrl = activeTab ? activeTab.url : window.location.href;
+      createTab(currentUrl);
+    };
+    tabsContainer.appendChild(newTabBtn);
+    
+    // 搜索按钮（固定在右侧控制容器）
+    const searchBtn = document.createElement('div');
+    searchBtn.className = 'tauri-search-tab';
+    searchBtn.innerHTML = '🔍';
+    searchBtn.title = '搜索标签 (Cmd+Shift+A)';
+    searchBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showTabSearch();
+    };
+    controlsContainer.appendChild(searchBtn);
+    
     // 隐藏滚动条但保持可滚动
-    tabBar.style.scrollbarWidth = 'none'; // Firefox
-    tabBar.style.msOverflowStyle = 'none'; // IE
     const style = document.createElement('style');
     style.textContent = `
-      #tauri-tab-bar::-webkit-scrollbar { display: none; }
+      .tauri-tabs-container::-webkit-scrollbar { display: none; }
       .tauri-tab {
-        min-width: 150px;
+        min-width: 40px;
         max-width: 200px;
+        width: 200px;
         height: 30px;
         background: rgba(255,255,255,0.05);
         border-radius: 6px 6px 0 0;
         display: flex;
         align-items: center;
-        padding: 0 12px;
+        padding: 0 8px;
         cursor: pointer;
-        transition: background 0.2s;
-        flex-shrink: 0;
+        transition: background 0.2s, width 0.3s ease;
+        flex-shrink: 1;
         position: relative;
       }
       .tauri-tab:hover {
@@ -867,6 +917,12 @@
         background: rgba(255,255,255,0.2);
         color: #fff;
       }
+      .tauri-tab-controls-fixed {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+      }
       .tauri-new-tab {
         min-width: 32px;
         width: 32px;
@@ -879,11 +935,28 @@
         cursor: pointer;
         transition: background 0.2s;
         color: #e0e0e0;
-        font-size: 20px;
         flex-shrink: 0;
-        margin-left: 4px;
+        font-size: 20px;
       }
       .tauri-new-tab:hover {
+        background: rgba(255,255,255,0.15);
+      }
+      .tauri-search-tab {
+        min-width: 32px;
+        width: 32px;
+        height: 30px;
+        background: rgba(255,255,255,0.05);
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: background 0.2s;
+        color: #e0e0e0;
+        flex-shrink: 0;
+        font-size: 18px;
+      }
+      .tauri-search-tab:hover {
         background: rgba(255,255,255,0.15);
       }
       .tauri-iframe-container {
@@ -925,20 +998,134 @@
           transform: translateY(0);
         }
       }
+      /* 搜索对话框 */
+      .tauri-tab-search-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.7);
+        z-index: 10000000;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding-top: 100px;
+        animation: overlayFadeIn 0.2s ease-out;
+      }
+      @keyframes overlayFadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      .tauri-tab-search-dialog {
+        background: #2c2c2c;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.8);
+        border: 1px solid #444;
+        width: 600px;
+        max-width: 90vw;
+        max-height: 500px;
+        display: flex;
+        flex-direction: column;
+        animation: dialogSlideIn 0.3s ease-out;
+        overflow: hidden;
+      }
+      @keyframes dialogSlideIn {
+        from {
+          opacity: 0;
+          transform: translateY(-20px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      .tauri-tab-search-input {
+        width: 100%;
+        padding: 16px 20px;
+        background: #1e1e1e;
+        border: none;
+        border-bottom: 1px solid #444;
+        color: #e0e0e0;
+        font-size: 16px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        outline: none;
+        border-radius: 12px 12px 0 0;
+        box-sizing: border-box;
+      }
+      .tauri-tab-search-input:focus {
+        background: #252525;
+        border-bottom-color: #0066cc;
+      }
+      .tauri-tab-search-input::placeholder {
+        color: #888;
+      }
+      .tauri-tab-search-results {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px 0;
+        min-height: 100px;
+      }
+      .tauri-tab-search-results::-webkit-scrollbar {
+        width: 8px;
+      }
+      .tauri-tab-search-results::-webkit-scrollbar-track {
+        background: #2c2c2c;
+      }
+      .tauri-tab-search-results::-webkit-scrollbar-thumb {
+        background: #555;
+        border-radius: 4px;
+      }
+      .tauri-tab-search-results::-webkit-scrollbar-thumb:hover {
+        background: #666;
+      }
+      .tauri-tab-search-item {
+        padding: 12px 20px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        transition: background 0.15s;
+      }
+      .tauri-tab-search-item:hover {
+        background: rgba(255,255,255,0.1);
+      }
+      .tauri-tab-search-item.selected {
+        background: rgba(0,102,204,0.3);
+      }
+      .tauri-tab-search-item-icon {
+        font-size: 20px;
+        flex-shrink: 0;
+      }
+      .tauri-tab-search-item-content {
+        flex: 1;
+        min-width: 0;
+      }
+      .tauri-tab-search-item-title {
+        color: #e0e0e0;
+        font-size: 14px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .tauri-tab-search-item-url {
+        color: #888;
+        font-size: 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-top: 2px;
+      }
+      .tauri-tab-search-empty {
+        padding: 40px 20px;
+        text-align: center;
+        color: #888;
+        font-size: 14px;
+      }
     `;
     document.head.appendChild(style);
     
     document.body.appendChild(tabBar);
-    
-    // 添加新建标签按钮
-    const newTabBtn = document.createElement('div');
-    newTabBtn.className = 'tauri-new-tab';
-    newTabBtn.innerHTML = '+';
-    newTabBtn.title = '新建标签 (Cmd+T)';
-    newTabBtn.addEventListener('click', () => {
-      createTab(window.location.href);
-    });
-    tabBar.appendChild(newTabBtn);
     
     return tabBar;
   }
@@ -1136,35 +1323,75 @@
     }, 100); // 延迟稍微久一点，确保当前右键事件已处理完
   }
   
+  // 更新标签宽度（根据标签数量和窗口大小动态调整，确保所有标签和+按钮可见）
+  function updateTabWidths() {
+    const tabsContainer = document.querySelector('.tauri-tabs-container');
+    const controlsContainer = document.querySelector('.tauri-tab-controls-fixed');
+    if (!tabsContainer || !controlsContainer) return;
+    
+    const tabs = window.tauriTabs.tabs;
+    const tabCount = tabs.length;
+    
+    if (tabCount === 0) return;
+    
+    // 计算可用宽度（Chrome 风格：所有标签和+按钮都要可见）
+    const controlsWidth = controlsContainer.offsetWidth || 50; // 搜索按钮区域宽度
+    const newTabBtnWidth = 36; // + 按钮固定宽度
+    const containerPadding = 16; // 标签容器的 padding (左右各8px)
+    const gapTotal = 4 * (tabCount + 1); // 所有间距（标签间 + 按钮前）
+    const totalWidth = window.innerWidth;
+    
+    // 可用宽度 = 总宽度 - 搜索按钮区 - + 按钮 - padding - 所有间距
+    const availableWidth = totalWidth - controlsWidth - newTabBtnWidth - containerPadding - gapTotal;
+    
+    // 计算每个标签的宽度：最小 40px（极限），最大 200px
+    // Chrome 会一直缩小标签直到 40px 左右
+    let tabWidth = Math.floor(availableWidth / tabCount);
+    tabWidth = Math.max(40, Math.min(200, tabWidth));
+    
+    tabs.forEach(tab => {
+      tab.element.style.width = `${tabWidth}px`;
+      tab.element.style.minWidth = '40px'; // 确保最小宽度
+      tab.element.style.maxWidth = '200px'; // 确保最大宽度
+    });
+    
+    log(`📏 更新标签宽度: ${tabWidth}px (标签: ${tabCount}, 可用: ${availableWidth}px, 窗口: ${totalWidth}px)`);
+  }
+  
   // 重新排序标签
   function reorderTabs(draggedId, targetId) {
     const tabs = window.tauriTabs.tabs;
     const draggedIndex = tabs.findIndex(t => t.id === draggedId);
     const targetIndex = tabs.findIndex(t => t.id === targetId);
     
-    if (draggedIndex === -1 || targetIndex === -1) return;
+    if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) return;
+    
+    log(`🔄 标签重新排序: ${draggedId} (索引 ${draggedIndex}) 移动到 ${targetId} (索引 ${targetIndex})`);
     
     // 移动数组中的位置
     const [draggedTab] = tabs.splice(draggedIndex, 1);
     tabs.splice(targetIndex, 0, draggedTab);
     
     // 更新 DOM
-    const tabBar = document.getElementById('tauri-tab-bar');
-    const newTabBtn = tabBar.querySelector('.tauri-new-tab');
+    const tabsContainer = document.querySelector('.tauri-tabs-container');
+    const newTabBtn = tabsContainer.querySelector('.tauri-new-tab');
     
-    // 清空标签栏（保留新建按钮）
-    Array.from(tabBar.children).forEach(child => {
+    // 清空标签容器（保留新建按钮）
+    Array.from(tabsContainer.children).forEach(child => {
       if (!child.classList.contains('tauri-new-tab')) {
         child.remove();
       }
     });
     
-    // 按新顺序添加标签
+    // 按新顺序添加标签（插入到 + 按钮之前）
     tabs.forEach(tab => {
-      tabBar.insertBefore(tab.element, newTabBtn);
+      tabsContainer.insertBefore(tab.element, newTabBtn);
     });
     
-    log(`🔄 标签重新排序: ${draggedId} 移动到 ${targetId} 附近`);
+    // 更新标签宽度
+    updateTabWidths();
+    
+    log(`✅ 标签重新排序完成`);
   }
   
   // 刷新标签
@@ -1388,9 +1615,10 @@
     const tabElement = createTabElement(id, title);
     const iframe = createIframe(url);
     
-    const tabBar = document.getElementById('tauri-tab-bar');
-    const newTabBtn = tabBar.querySelector('.tauri-new-tab');
-    tabBar.insertBefore(tabElement, newTabBtn);
+    const tabsContainer = document.querySelector('.tauri-tabs-container');
+    const newTabBtn = tabsContainer.querySelector('.tauri-new-tab');
+    // 插入到 + 按钮之前
+    tabsContainer.insertBefore(tabElement, newTabBtn);
     
     const tabData = {
       id,
@@ -1462,6 +1690,10 @@
     });
     
     switchTab(id);
+    
+    // 更新所有标签宽度
+    updateTabWidths();
+    
     return id;
   }
   
@@ -1542,6 +1774,141 @@
       const newIndex = Math.min(index, tabs.length - 1);
       switchTab(tabs[newIndex].id);
     }
+    
+    // 更新所有标签宽度
+    updateTabWidths();
+  }
+  
+  // 显示标签搜索对话框
+  function showTabSearch() {
+    log('🔍 打开标签搜索');
+    
+    // 创建遮罩层
+    const overlay = document.createElement('div');
+    overlay.className = 'tauri-tab-search-overlay';
+    
+    // 创建对话框
+    const dialog = document.createElement('div');
+    dialog.className = 'tauri-tab-search-dialog';
+    
+    // 搜索输入框
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'tauri-tab-search-input';
+    input.placeholder = '搜索标签标题';
+    
+    // 结果容器
+    const results = document.createElement('div');
+    results.className = 'tauri-tab-search-results';
+    
+    dialog.appendChild(input);
+    dialog.appendChild(results);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    
+    let selectedIndex = 0;
+    
+    // 渲染搜索结果
+    function renderResults(query = '') {
+      const tabs = window.tauriTabs.tabs;
+      const filtered = query.trim() === '' ? tabs : tabs.filter(tab => {
+        const title = (tab.title || '').toLowerCase();
+        const q = query.toLowerCase();
+        return title.includes(q); // 只搜索标题
+      });
+      
+      results.innerHTML = '';
+      
+      if (filtered.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'tauri-tab-search-empty';
+        empty.textContent = '没有找到匹配的标签';
+        results.appendChild(empty);
+        return;
+      }
+      
+      filtered.forEach((tab, index) => {
+        const item = document.createElement('div');
+        item.className = 'tauri-tab-search-item';
+        if (index === selectedIndex) {
+          item.classList.add('selected');
+        }
+        
+        const icon = document.createElement('div');
+        icon.className = 'tauri-tab-search-item-icon';
+        icon.textContent = '📄';
+        
+        const content = document.createElement('div');
+        content.className = 'tauri-tab-search-item-content';
+        
+        const titleEl = document.createElement('div');
+        titleEl.className = 'tauri-tab-search-item-title';
+        titleEl.textContent = tab.title || 'Untitled';
+        
+        content.appendChild(titleEl);
+        // 不显示 URL
+        
+        item.appendChild(icon);
+        item.appendChild(content);
+        
+        item.addEventListener('click', () => {
+          switchTab(tab.id);
+          closeSearch();
+        });
+        
+        results.appendChild(item);
+      });
+      
+      selectedIndex = Math.min(selectedIndex, filtered.length - 1);
+    }
+    
+    // 关闭搜索
+    function closeSearch() {
+      overlay.remove();
+      log('🔍 关闭标签搜索');
+    }
+    
+    // 输入事件
+    input.addEventListener('input', () => {
+      selectedIndex = 0;
+      renderResults(input.value);
+    });
+    
+    // 键盘事件
+    input.addEventListener('keydown', (e) => {
+      const items = results.querySelectorAll('.tauri-tab-search-item');
+      
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeSearch();
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+        renderResults(input.value);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        selectedIndex = Math.max(selectedIndex - 1, 0);
+        renderResults(input.value);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (items[selectedIndex]) {
+          items[selectedIndex].click();
+        }
+      }
+    });
+    
+    // 点击遮罩关闭
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        closeSearch();
+      }
+    });
+    
+    // 初始渲染
+    renderResults();
+    
+    // 自动聚焦
+    setTimeout(() => input.focus(), 100);
   }
   
   // 更新标签标题
@@ -1621,6 +1988,13 @@
         window.tauriOpenNewWindow(currentUrl);
       }
       
+      // Cmd+Shift+A: 搜索标签
+      if (e.key === 'A' && e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        showTabSearch();
+      }
+      
       // Cmd+数字键: 快速切换标签 (1-9)
       if (e.key >= '1' && e.key <= '9') {
         e.preventDefault();
@@ -1676,6 +2050,16 @@
       }
     });
     
+    // 监听窗口大小变化，动态调整标签宽度
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        updateTabWidths();
+        log('🔄 窗口大小变化，重新计算标签宽度');
+      }, 200); // 防抖：延迟 200ms 执行
+    });
+    
     log("✅ 标签页系统初始化完成");
     console.log("🎉 标签页功能已启用:");
     console.log("  ╔════════════════════════════════════╗");
@@ -1683,6 +2067,7 @@
     console.log("  ╠════════════════════════════════════╣");
     console.log("  ║  Cmd+T          新建标签           ║");
     console.log("  ║  Cmd+W          关闭当前标签       ║");
+    console.log("  ║  Cmd+Shift+A    搜索标签           ║");
     console.log("  ║  Cmd+Shift+N    新窗口（多窗口）   ║");
     console.log("  ║  Cmd+1~9        切换到第 N 个标签  ║");
     console.log("  ╠════════════════════════════════════╣");
@@ -1690,9 +2075,10 @@
     console.log("  ╠════════════════════════════════════╣");
     console.log("  ║  拖动标签        重新排序          ║");
     console.log("  ║  右键标签        显示菜单          ║");
+    console.log("  ║  点击 🔍        搜索标签           ║");
     console.log("  ║  点击 +          新建标签          ║");
     console.log("  ╚════════════════════════════════════╝");
-    console.log("  最多支持 20 个标签，拖动排序，右键菜单功能齐全");
+    console.log("  最多支持 20 个标签，动态宽度，拖动排序，搜索功能");
   }
   
   // 启动标签页系统（仅在顶层窗口）
