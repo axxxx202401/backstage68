@@ -3,9 +3,8 @@
 private_key.pem
 # public_key.pem
 
-# npm 依赖和构建产物
+# npm 依赖
 node_modules/
-package-lock.json
 
 # Rollup 构建产物（inject.js 是由 inject-refactored.js 生成的）
 # ⚠️ 编译生成，不要提交
