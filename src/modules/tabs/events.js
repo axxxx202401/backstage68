@@ -2,7 +2,7 @@
  * 标签页事件模块 - 键盘快捷键、拖拽、右键菜单
  */
 
-import { createTab, closeTab, activateTab, refreshTab, duplicateTab, openTabInNewWindow, closeTabsToLeft, closeTabsToRight, closeOtherTabs, reorderTabs } from './operations.js';
+import { createTab, closeTab, activateTab, refreshTab, duplicateTab, openTabInNewWindow, closeTabsToLeft, closeTabsToRight, closeOtherTabs, reorderTabs, getTabCurrentUrl } from './operations.js';
 import { setupSimpleDrag } from './drag-simple.js';
 
 // 初始化事件监听
@@ -461,17 +461,7 @@ function setupDragEvents() {
     if (!tab) return;
     
     try {
-      // 获取当前标签的真实 URL
-      let currentUrl = tab.url;
-      try {
-        const iframeWindow = tab.iframe.contentWindow;
-        if (iframeWindow && iframeWindow.location && iframeWindow.location.href) {
-          currentUrl = iframeWindow.location.href;
-          log(`   使用 iframe 当前 URL: ${currentUrl}`);
-        }
-      } catch (err) {
-        log(`   无法获取 iframe URL，使用原始 URL: ${tab.url}`);
-      }
+      const currentUrl = getTabCurrentUrl(tab, log);
       
       log(`🚀 创建新窗口: ${currentUrl}`);
       

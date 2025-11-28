@@ -369,6 +369,35 @@ export function refreshTab(tabId) {
   tab.iframe.src = tab.iframe.src;
 }
 
+export function getTabCurrentUrl(tab, log) {
+  if (!tab) {
+    return window.location.href;
+  }
+  
+  let currentUrl = tab.url || window.location.href;
+  
+  if (!tab.iframe) {
+    return currentUrl;
+  }
+  
+  try {
+    const iframeWindow = tab.iframe.contentWindow;
+    const href = iframeWindow?.location?.href;
+    if (href) {
+      if (log) {
+        log(`   使用 iframe 当前 URL: ${href}`);
+      }
+      return href;
+    }
+  } catch (err) {
+    if (log) {
+      log(`   无法获取 iframe 当前 URL，使用原始 URL: ${currentUrl}`);
+    }
+  }
+  
+  return currentUrl;
+}
+
 // 复制标签
 export function duplicateTab(tabId) {
   const tab = window.tauriTabs.tabs.find(t => t.id === tabId);
@@ -384,16 +413,7 @@ export function duplicateTab(tabId) {
   
   log(`📋 复制标签: ${tabId}, URL: ${tab.url}`);
   
-  let currentUrl = tab.url;
-  try {
-    const iframeWindow = tab.iframe.contentWindow;
-    if (iframeWindow && iframeWindow.location && iframeWindow.location.href) {
-      currentUrl = iframeWindow.location.href;
-      log(`   使用 iframe 当前 URL: ${currentUrl}`);
-    }
-  } catch (err) {
-    log(`   无法获取 iframe 当前 URL，使用原始 URL: ${tab.url}`);
-  }
+  const currentUrl = getTabCurrentUrl(tab, log);
   
   createTab(currentUrl);
 }
@@ -407,16 +427,7 @@ export async function openTabInNewWindow(tabId) {
   
   log(`🪟 在新窗口打开: ${tab.url}`);
   try {
-    let currentUrl = tab.url;
-    try {
-      const iframeWindow = tab.iframe.contentWindow;
-      if (iframeWindow && iframeWindow.location && iframeWindow.location.href) {
-        currentUrl = iframeWindow.location.href;
-        log(`   使用 iframe 当前 URL: ${currentUrl}`);
-      }
-    } catch (err) {
-      log(`   无法获取 iframe 当前 URL，使用原始 URL: ${tab.url}`);
-    }
+    const currentUrl = getTabCurrentUrl(tab, log);
 
     if (window.tauriOpenNewWindow) {
       await window.tauriOpenNewWindow(currentUrl);

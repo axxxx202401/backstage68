@@ -21,11 +21,6 @@ fn escape_js_string(s: &str) -> String {
         .replace('\r', "\\r")
 }
 
-// 编译时注入的环境变量
-const ENV_NAME: &str = env!("TAURI_ENV_NAME");
-const ENV_URL: &str = env!("TAURI_ENV_URL");
-const ENV_KEY: &str = env!("TAURI_ENV_KEY");
-
 // 编译时判断是否启用日志（使用字节比较避免 const 限制）
 #[cfg(debug_assertions)]
 const ENABLE_LOGS: bool = true;
@@ -47,6 +42,22 @@ macro_rules! log {
     };
 }
 
+fn resolve_env_var(key: &str, default_value: &str) -> String {
+    std::env::var(key).unwrap_or_else(|_| default_value.to_string())
+}
+
+fn env_name() -> String {
+    resolve_env_var("TAURI_ENV_NAME", "Backstage68")
+}
+
+fn env_url() -> String {
+    resolve_env_var("TAURI_ENV_URL", "https://example.com")
+}
+
+fn env_key() -> String {
+    resolve_env_var("TAURI_ENV_KEY", "default")
+}
+
 // 编译时判断是否启用开发者工具
 #[cfg(debug_assertions)]
 const DEVTOOLS_ENABLED: bool = true;
@@ -62,7 +73,7 @@ const DEVTOOLS_ENABLED: bool = {
 /// 获取当前环境信息
 #[tauri::command]
 fn get_env_info() -> Result<String, String> {
-    Ok(format!("当前环境: {} ({})", ENV_NAME, ENV_KEY))
+    Ok(format!("当前环境: {} ({})", env_name(), env_key()))
 }
 
 /// 设置页面缩放（使用 CSS zoom 属性，类似浏览器原生缩放）
@@ -122,14 +133,22 @@ async fn create_new_window(
     log!("🪟 Creating new window: {}", window_label);
 
     // 使用传入的 URL（当前页面）或默认 URL
-    let target_url = current_url.unwrap_or_else(|| ENV_URL.to_string());
+    let target_url = current_url.unwrap_or_else(|| env_url());
     log!("   Target URL: {}", target_url);
 
     // 获取注入脚本
     let inject_script = include_str!("../../src/inject.js");
 
     // 构建初始化脚本：恢复存储（不跳转）
-    let storage_restore_script = if let Some(data) = storage_data {
+    let sanitized_storage = storage_data.and_then(|raw| match serde_json::from_str::<serde_json::Value>(&raw) {
+        Ok(_) => Some(raw),
+        Err(err) => {
+            log!("⚠️  Invalid storage data, skipping restore: {}", err);
+            None
+        }
+    });
+
+    let storage_restore_script = if let Some(data) = sanitized_storage {
         let escaped_data = escape_js_string(&data);
 
         format!(
@@ -175,8 +194,17 @@ async fn create_new_window(
     // 新窗口直接打开目标 URL（不是首页）
     let initial_url = target_url.clone();
 
-    let target_width = width.unwrap_or(1200.0);
-    let target_height = height.unwrap_or(800.0);
+    fn clamp_dimension(value: Option<f64>, default: f64) -> f64 {
+        const MIN: f64 = 200.0;
+        const MAX: f64 = 3000.0;
+        value
+            .filter(|v| v.is_finite())
+            .map(|v| v.clamp(MIN, MAX))
+            .unwrap_or(default)
+    }
+
+    let target_width = clamp_dimension(width, 1200.0);
+    let target_height = clamp_dimension(height, 800.0);
 
     let _window = WebviewWindowBuilder::new(
         &app,
@@ -187,7 +215,7 @@ async fn create_new_window(
                 .map_err(|e| format!("Invalid URL: {}", e))?,
         ),
     )
-    .title(format!("{} - 窗口 {}", ENV_NAME, window_id))
+    .title(format!("{} - 窗口 {}", env_name(), window_id))
     .inner_size(target_width, target_height)
     .initialization_script(&final_script)
     .build()
@@ -218,8 +246,8 @@ pub fn run() {
     let inject_script = include_str!("../../src/inject.js").to_string();
 
     // 使用编译时注入的环境变量
-    log!("🌍 Environment: {} ({})", ENV_NAME, ENV_KEY);
-    log!("📍 URL: {}", ENV_URL);
+    log!("🌍 Environment: {} ({})", env_name(), env_key());
+    log!("📍 URL: {}", env_url());
     log!(
         "🔧 DevTools: {}",
         if DEVTOOLS_ENABLED {
@@ -235,7 +263,7 @@ pub fn run() {
             log!("🚀 Creating main window...");
 
             // 准备注入脚本：将 inject.js 内容和目标 URL 变量合并
-            let target_url = ENV_URL.to_string();
+            let target_url = env_url();
             let final_script = format!(
                 "window.__TAURI_ENABLE_LOGS__ = {};\n{}",
                 ENABLE_LOGS, inject_script
@@ -247,7 +275,7 @@ pub fn run() {
                 "main",
                 WebviewUrl::External(target_url.parse().unwrap()),
             )
-            .title(format!("Backstage68 - {}", ENV_NAME))
+            .title(format!("Backstage68 - {}", env_name()))
             .inner_size(1200.0, 800.0)
             .resizable(true)
             .initialization_script(&final_script)

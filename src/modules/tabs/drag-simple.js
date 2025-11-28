@@ -18,10 +18,12 @@ export function setupSimpleDrag(log) {
 
   // 导入需要的函数
   let reorderTabs;
+  let getTabCurrentUrl;
 
   // 动态导入
   import('./operations.js').then(module => {
     reorderTabs = module.reorderTabs;
+    getTabCurrentUrl = module.getTabCurrentUrl;
   });
 
   // 创建幽灵元素
@@ -182,10 +184,9 @@ export function setupSimpleDrag(log) {
         try {
           const tab = window.tauriTabs.tabs.find(t => t.id === dragState.draggedTabId);
           if (tab && window.tauriOpenNewWindow) {
-            let currentUrl = tab.url;
-            try {
-              currentUrl = tab.iframe.contentWindow.location.href;
-            } catch (err) {}
+            const currentUrl = getTabCurrentUrl
+              ? getTabCurrentUrl(tab, log)
+              : (tab.url || window.location.href);
             
             await window.tauriOpenNewWindow(currentUrl);
 
