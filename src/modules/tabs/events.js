@@ -3,7 +3,6 @@
  */
 
 import { createTab, closeTab, activateTab, refreshTab, duplicateTab, openTabInNewWindow, closeTabsToLeft, closeTabsToRight, closeOtherTabs, reorderTabs } from './operations.js';
-import { serializeStorage } from '../utils/storage.js';
 import { setupSimpleDrag } from './drag-simple.js';
 
 // 初始化事件监听
@@ -15,7 +14,7 @@ export function initTabEvents() {
   console.log('✅ setupKeyboardShortcuts 完成');
   
   // 使用简单的鼠标拖动系统
-  setupSimpleDrag(window.tauriTabs.log, window.tauriTabs.invoke);
+  setupSimpleDrag(window.tauriTabs.log);
   console.log('✅ setupSimpleDrag 完成');
   
   window.tauriTabs.showContextMenu = showTabContextMenu;
@@ -458,7 +457,6 @@ function setupDragEvents() {
   async function tearOffTab(tabId) {
     const tabs = window.tauriTabs.tabs;
     const tab = tabs.find(t => t.id === tabId);
-    const invoke = window.tauriTabs.invoke;
     
     if (!tab) return;
     
@@ -475,16 +473,14 @@ function setupDragEvents() {
         log(`   无法获取 iframe URL，使用原始 URL: ${tab.url}`);
       }
       
-      // 序列化存储数据
-      const storageData = serializeStorage();
-      
       log(`🚀 创建新窗口: ${currentUrl}`);
       
-      // 创建新窗口
-      await invoke('create_new_window', {
-        currentUrl: currentUrl,
-        storageData: JSON.stringify(storageData)
-      });
+      if (window.tauriOpenNewWindow) {
+        await window.tauriOpenNewWindow(currentUrl);
+      } else {
+        log('❌ 无法创建新窗口，tauriOpenNewWindow 未初始化');
+        return;
+      }
       
       // 如果不是最后一个标签，关闭当前标签
       if (tabs.length > 1) {

@@ -109,6 +109,8 @@ async fn create_new_window(
     app: tauri::AppHandle,
     current_url: Option<String>,
     storage_data: Option<String>,
+    width: Option<f64>,
+    height: Option<f64>,
 ) -> Result<String, String> {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -173,6 +175,9 @@ async fn create_new_window(
     // 新窗口直接打开目标 URL（不是首页）
     let initial_url = target_url.clone();
 
+    let target_width = width.unwrap_or(1200.0);
+    let target_height = height.unwrap_or(800.0);
+
     let _window = WebviewWindowBuilder::new(
         &app,
         &window_label,
@@ -183,6 +188,7 @@ async fn create_new_window(
         ),
     )
     .title(format!("{} - 窗口 {}", ENV_NAME, window_id))
+    .inner_size(target_width, target_height)
     .initialization_script(&final_script)
     .build()
     .map_err(|e| format!("Failed to create window: {}", e))?;

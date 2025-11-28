@@ -5,6 +5,18 @@
 import { serializeStorage } from './utils/storage.js';
 import { getModifierKey } from './utils/dom.js';
 
+function getWindowSize() {
+  const width = window.innerWidth
+    || document.documentElement?.clientWidth
+    || window.outerWidth
+    || 1200;
+  const height = window.innerHeight
+    || document.documentElement?.clientHeight
+    || window.outerHeight
+    || 800;
+  return { width, height };
+}
+
 export function initWindow(log, invoke) {
   log("🪟 初始化多窗口模块...");
 
@@ -15,10 +27,13 @@ export function initWindow(log, invoke) {
       log(`🪟 准备打开新窗口: ${targetUrl}`);
       
       const storageData = serializeStorage();
+      const { width, height } = getWindowSize();
       
       const windowLabel = await invoke('create_new_window', { 
         currentUrl: targetUrl,
-        storageData: JSON.stringify(storageData)
+        storageData: JSON.stringify(storageData),
+        width,
+        height
       });
       
       log(`✅ 新窗口已创建: ${windowLabel}`);

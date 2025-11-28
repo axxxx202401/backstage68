@@ -2,7 +2,7 @@
  * 简单的拖动排序实现 - 使用鼠标事件而非 HTML5 drag API
  */
 
-export function setupSimpleDrag(log, invoke) {
+export function setupSimpleDrag(log) {
   let dragState = {
     isDragging: false,
     draggedTab: null,
@@ -17,15 +17,11 @@ export function setupSimpleDrag(log, invoke) {
   };
 
   // 导入需要的函数
-  let reorderTabs, serializeStorage;
+  let reorderTabs;
 
   // 动态导入
   import('./operations.js').then(module => {
     reorderTabs = module.reorderTabs;
-  });
-  
-  import('../utils/storage.js').then(module => {
-    serializeStorage = module.serializeStorage;
   });
 
   // 创建幽灵元素
@@ -183,31 +179,26 @@ export function setupSimpleDrag(log, invoke) {
         console.log('🪟 拖出窗口，创建新窗口');
         log(`🪟 拖出窗口！创建新窗口...`);
         
-        // 创建新窗口
-        if (invoke && serializeStorage) {
-          try {
-            const tab = window.tauriTabs.tabs.find(t => t.id === dragState.draggedTabId);
-            if (tab) {
-              let currentUrl = tab.url;
-              try {
-                currentUrl = tab.iframe.contentWindow.location.href;
-              } catch (err) {}
-              
-              const storageData = serializeStorage();
-              await invoke('create_new_window', {
-                currentUrl: currentUrl,
-                storageData: JSON.stringify(storageData)
-              });
+        try {
+          const tab = window.tauriTabs.tabs.find(t => t.id === dragState.draggedTabId);
+          if (tab && window.tauriOpenNewWindow) {
+            let currentUrl = tab.url;
+            try {
+              currentUrl = tab.iframe.contentWindow.location.href;
+            } catch (err) {}
+            
+            await window.tauriOpenNewWindow(currentUrl);
 
-              // 关闭原标签
-              if (window.tauriTabs.tabs.length > 1) {
-                const { closeTab } = await import('./operations.js');
-                closeTab(dragState.draggedTabId);
-              }
+            // 关闭原标签
+            if (window.tauriTabs.tabs.length > 1) {
+              const { closeTab } = await import('./operations.js');
+              closeTab(dragState.draggedTabId);
             }
-          } catch (err) {
-            console.error('创建新窗口失败:', err);
+          } else {
+            log('❌ 无法创建新窗口，tauriOpenNewWindow 未初始化');
           }
+        } catch (err) {
+          console.error('创建新窗口失败:', err);
         }
       } else {
         // 执行排序

@@ -3,7 +3,6 @@
  */
 
 import { TAB_CONFIG, updateTabWidths } from './ui.js';
-import { serializeStorage } from '../utils/storage.js';
 
 // 创建标签 DOM 元素
 export function createTabElement(id, title, callbacks) {
@@ -403,19 +402,27 @@ export function duplicateTab(tabId) {
 export async function openTabInNewWindow(tabId) {
   const tab = window.tauriTabs.tabs.find(t => t.id === tabId);
   const log = window.tauriTabs.log;
-  const invoke = window.tauriTabs.invoke;
   
   if (!tab) return;
   
   log(`🪟 在新窗口打开: ${tab.url}`);
   try {
-    // 序列化存储数据，以便新窗口继承登录状态
-    const storageData = serializeStorage();
-    
-    await invoke('create_new_window', { 
-      currentUrl: tab.url,
-      storageData: JSON.stringify(storageData)
-    });
+    let currentUrl = tab.url;
+    try {
+      const iframeWindow = tab.iframe.contentWindow;
+      if (iframeWindow && iframeWindow.location && iframeWindow.location.href) {
+        currentUrl = iframeWindow.location.href;
+        log(`   使用 iframe 当前 URL: ${currentUrl}`);
+      }
+    } catch (err) {
+      log(`   无法获取 iframe 当前 URL，使用原始 URL: ${tab.url}`);
+    }
+
+    if (window.tauriOpenNewWindow) {
+      await window.tauriOpenNewWindow(currentUrl);
+    } else {
+      log('❌ 无法打开新窗口：tauriOpenNewWindow 未初始化');
+    }
   } catch (err) {
     console.error('Failed to open new window:', err);
   }
