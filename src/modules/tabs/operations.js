@@ -3,15 +3,15 @@
  */
 
 import { TAB_CONFIG, updateTabWidths } from './ui.js';
+import { serializeStorage } from '../utils/storage.js';
 
 // 创建标签 DOM 元素
 export function createTabElement(id, title, callbacks) {
-  const { onClose, onSwitch, onContextMenu, onDragEvents } = callbacks;
+  const { onClose, onSwitch, onContextMenu } = callbacks;
   
   const tab = document.createElement('div');
   tab.className = 'tauri-tab';
   tab.dataset.tabId = id;
-  tab.setAttribute('draggable', 'true');
   
   const titleSpan = document.createElement('span');
   titleSpan.className = 'tauri-tab-title';
@@ -37,14 +37,7 @@ export function createTabElement(id, title, callbacks) {
     onContextMenu(id, e.clientX, e.clientY);
   });
   
-  // 拖动事件
-  if (onDragEvents) {
-    tab.addEventListener('dragstart', (e) => onDragEvents.dragStart(e, id, tab));
-    tab.addEventListener('dragend', (e) => onDragEvents.dragEnd(e, id, tab));
-    tab.addEventListener('dragover', (e) => onDragEvents.dragOver(e, tab));
-    tab.addEventListener('dragleave', (e) => onDragEvents.dragLeave(e, tab));
-    tab.addEventListener('drop', (e) => onDragEvents.drop(e, id, tab));
-  }
+  // 不再需要 HTML5 drag 事件监听器，改用鼠标事件
   
   return tab;
 }
@@ -203,8 +196,7 @@ export function createTab(url) {
   const tabElement = createTabElement(id, title, {
     onClose: closeTab,
     onSwitch: activateTab,
-    onContextMenu: window.tauriTabs.showContextMenu || (() => {}),
-    onDragEvents: window.tauriTabs.dragEvents || null
+    onContextMenu: window.tauriTabs.showContextMenu || (() => {})
   });
   
   const iframe = createIframe(url, log);
@@ -417,9 +409,12 @@ export async function openTabInNewWindow(tabId) {
   
   log(`🪟 在新窗口打开: ${tab.url}`);
   try {
+    // 序列化存储数据，以便新窗口继承登录状态
+    const storageData = serializeStorage();
+    
     await invoke('create_new_window', { 
       currentUrl: tab.url,
-      storageData: null
+      storageData: JSON.stringify(storageData)
     });
   } catch (err) {
     console.error('Failed to open new window:', err);
@@ -475,7 +470,10 @@ export function reorderTabs(draggedId, targetId) {
   const draggedIndex = tabs.findIndex(t => t.id === draggedId);
   const targetIndex = tabs.findIndex(t => t.id === targetId);
   
-  if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) return;
+  if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) {
+    log(`⚠️ 重新排序失败: draggedIndex=${draggedIndex}, targetIndex=${targetIndex}`);
+    return;
+  }
   
   log(`🔄 标签重新排序: ${draggedId} (索引 ${draggedIndex}) 移动到 ${targetId} (索引 ${targetIndex})`);
   
@@ -487,11 +485,14 @@ export function reorderTabs(draggedId, targetId) {
   const tabsContainer = document.querySelector('.tauri-tabs-container');
   const newTabBtn = tabsContainer.querySelector('.tauri-new-tab');
   
-  // 清空标签容器（保留新建按钮）
-  Array.from(tabsContainer.children).forEach(child => {
-    if (!child.classList.contains('tauri-new-tab')) {
-      child.remove();
-    }
+  if (!tabsContainer || !newTabBtn) {
+    log('❌ 找不到标签容器或新建按钮');
+    return;
+  }
+  
+  // 只移除标签元素（不移除按钮和其他控件）
+  Array.from(tabsContainer.querySelectorAll('.tauri-tab')).forEach(tabEl => {
+    tabEl.remove();
   });
   
   // 按新顺序添加标签
@@ -500,7 +501,7 @@ export function reorderTabs(draggedId, targetId) {
   });
   
   updateTabWidths();
-  log(`✅ 标签重新排序完成`);
+  log(`✅ 标签重新排序完成，新顺序: ${tabs.map(t => t.id).join(', ')}`);
 }
 
 // 更新标签标题
