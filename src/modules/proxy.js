@@ -171,7 +171,11 @@ export function initProxy(log, invoke) {
         }
         console.log('📊 Response Status:', debug.response_status);
         console.log('📥 Response Headers:', debug.response_headers);
-        console.log('📄 Response Body:', response.body.substring(0, 500));
+        if (response.is_binary) {
+          console.log('📦 Response Type: Binary (base64 encoded)');
+        } else {
+          console.log('📄 Response Body:', response.body.substring(0, 500));
+        }
         console.groupEnd();
       }
       
@@ -179,7 +183,23 @@ export function initProxy(log, invoke) {
         log.error("⚠️ 403 Forbidden!");
       }
       
-      return new Response(response.body, {
+      // 处理响应体：如果是二进制，解码 base64
+      let responseBody;
+      if (response.is_binary) {
+        // 二进制响应：解码 base64 -> Uint8Array
+        log("📦 解码二进制响应");
+        const binaryString = atob(response.body);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        responseBody = bytes;
+      } else {
+        // 文本响应：直接使用
+        responseBody = response.body;
+      }
+      
+      return new Response(responseBody, {
         status: response.status,
         statusText: response.status === 200 ? 'OK' : 'Error',
         headers: new Headers(response.headers)
@@ -303,14 +323,33 @@ export function initProxy(log, invoke) {
             }
             console.log('📊 Response Status:', debug.response_status);
             console.log('📥 Response Headers:', debug.response_headers);
-            console.log('📄 Response Body:', response.body.substring(0, 500));
+            if (response.is_binary) {
+              console.log('📦 Response Type: Binary (base64 encoded)');
+            } else {
+              console.log('📄 Response Body:', response.body.substring(0, 500));
+            }
             console.groupEnd();
+          }
+          
+          // 处理响应体
+          let responseBody;
+          if (response.is_binary) {
+            // 二进制响应：解码 base64 -> ArrayBuffer
+            const binaryString = atob(response.body);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+            }
+            responseBody = bytes.buffer; // ArrayBuffer
+          } else {
+            // 文本响应
+            responseBody = response.body;
           }
           
           self.status = response.status;
           self.statusText = response.status === 200 ? "OK" : "";
-          self.responseText = response.body;
-          self.response = response.body;
+          self.responseText = response.is_binary ? "" : response.body; // 二进制时不设置 responseText
+          self.response = responseBody;
           self.readyState = 4;
           self.responseHeaders = response.headers;
           
@@ -351,14 +390,33 @@ export function initProxy(log, invoke) {
           }
           console.log('📊 Response Status:', debug.response_status);
           console.log('📥 Response Headers:', debug.response_headers);
-          console.log('📄 Response Body:', response.body.substring(0, 500));
+          if (response.is_binary) {
+            console.log('📦 Response Type: Binary (base64 encoded)');
+          } else {
+            console.log('📄 Response Body:', response.body.substring(0, 500));
+          }
           console.groupEnd();
+        }
+        
+        // 处理响应体
+        let responseBody;
+        if (response.is_binary) {
+          // 二进制响应：解码 base64 -> ArrayBuffer
+          const binaryString = atob(response.body);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          responseBody = bytes.buffer;
+        } else {
+          // 文本响应
+          responseBody = response.body;
         }
         
         self.status = response.status;
         self.statusText = response.status === 200 ? "OK" : "";
-        self.responseText = response.body;
-        self.response = response.body;
+        self.responseText = response.is_binary ? "" : response.body;
+        self.response = responseBody;
         self.readyState = 4;
         self.responseHeaders = response.headers;
 

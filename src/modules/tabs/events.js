@@ -633,7 +633,7 @@ function setupMouseGestures() {
     indicator: null
   };
   
-  const GESTURE_THRESHOLD = 80;      // 触发手势的最小滑动距离（像素），提高到80
+  const GESTURE_THRESHOLD = 50;      // 触发手势的最小滑动距离（像素），提高到80
   const MIN_VELOCITY = 0.3;          // 最小速度（像素/毫秒），确保是连续滑动
   
   log('🎯 设置鼠标手势监听（基于 contextmenu 事件）');
