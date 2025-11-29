@@ -3,7 +3,7 @@
  */
 
 import { createTabBar, updateTabWidths, TAB_CONFIG } from './ui.js';
-import { createTab, closeTab, activateTab, duplicateTab, reorderTabs } from './operations.js';
+import { createTab, closeTab, activateTab, duplicateTab, reorderTabs, switchToNextTab, switchToPrevTab } from './operations.js';
 import { initTabEvents } from './events.js';
 import { showTabSearch } from './search.js';
 
@@ -117,6 +117,8 @@ export function initTabs(log, invoke) {
   window.tauriTabs.activateTab = activateTab;
   window.tauriTabs.duplicateTab = duplicateTab;
   window.tauriTabs.reorderTabs = reorderTabs;
+  window.tauriTabs.switchToNextTab = switchToNextTab;
+  window.tauriTabs.switchToPrevTab = switchToPrevTab;
   window.tauriTabs.showSearch = showTabSearch;
   window.tauriTabs.updateTabWidths = updateTabWidths;
 
@@ -135,6 +137,8 @@ export function initTabs(log, invoke) {
   console.log("  ╠════════════════════════════════════╣");
   console.log("  ║  拖动标签        重新排序          ║");
   console.log("  ║  右键标签        显示菜单          ║");
+  console.log("  ║  右键向右滑      切到上个标签      ║");
+  console.log("  ║  右键向左滑      切到下个标签      ║");
   console.log("  ║  点击 🔍        搜索标签           ║");
   console.log("  ║  点击 +          新建标签          ║");
   console.log("  ╚════════════════════════════════════╝");

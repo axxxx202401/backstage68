@@ -30,11 +30,10 @@ export function createTabElement(id, title, callbacks) {
   }
   
   tab.addEventListener('click', () => onSwitch(id));
-  tab.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    onContextMenu(id, e.clientX, e.clientY);
-  });
+  
+  // 不在这里绑定 contextmenu，改为在全局手势系统中处理
+  // 只需要标记 tab 的 id，让全局处理器知道点击的是哪个标签
+  tab.dataset.tabId = id;
   
   // 不再需要 HTML5 drag 事件监听器，改用鼠标事件
   
@@ -97,6 +96,11 @@ export function createIframe(url, log) {
         // 在 iframe 内部添加键盘事件监听器
         setupIframeEvents(iframeDoc, log);
         log(`✅ iframe 事件监听器已安装`);
+        
+        // 在 iframe 内部添加手势监听器
+        if (window.tauriTabs && window.tauriTabs.setupGestureInIframe) {
+          window.tauriTabs.setupGestureInIframe(iframeDoc);
+        }
       }
     } catch (err) {
       log(`⚠️  处理 iframe 事件失败: ${err.message}`);
@@ -547,6 +551,44 @@ export function updateTabTitle(id, title) {
   if (id === window.tauriTabs.activeTabId) {
     updateMainWindowTitle(title);
   }
+}
+
+// 切换到下一个标签（向右）
+export function switchToNextTab() {
+  const tabs = window.tauriTabs.tabs;
+  const currentId = window.tauriTabs.activeTabId;
+  const log = window.tauriTabs.log;
+  
+  if (!currentId || tabs.length <= 1) return;
+  
+  const currentIndex = tabs.findIndex(t => t.id === currentId);
+  if (currentIndex === -1) return;
+  
+  // 循环到下一个标签，如果是最后一个则回到第一个
+  const nextIndex = (currentIndex + 1) % tabs.length;
+  const nextTab = tabs[nextIndex];
+  
+  log(`➡️ 手势切换到下一个标签: ${nextTab.id}`);
+  activateTab(nextTab.id);
+}
+
+// 切换到上一个标签（向左）
+export function switchToPrevTab() {
+  const tabs = window.tauriTabs.tabs;
+  const currentId = window.tauriTabs.activeTabId;
+  const log = window.tauriTabs.log;
+  
+  if (!currentId || tabs.length <= 1) return;
+  
+  const currentIndex = tabs.findIndex(t => t.id === currentId);
+  if (currentIndex === -1) return;
+  
+  // 循环到上一个标签，如果是第一个则回到最后一个
+  const prevIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+  const prevTab = tabs[prevIndex];
+  
+  log(`⬅️ 手势切换到上一个标签: ${prevTab.id}`);
+  activateTab(prevTab.id);
 }
 
 // 更新主窗口标题

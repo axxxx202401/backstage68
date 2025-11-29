@@ -1,8 +1,8 @@
 /**
- * 标签页事件模块 - 键盘快捷键、拖拽、右键菜单
+ * 标签页事件模块 - 键盘快捷键、拖拽、右键菜单、鼠标手势
  */
 
-import { createTab, closeTab, activateTab, refreshTab, duplicateTab, openTabInNewWindow, closeTabsToLeft, closeTabsToRight, closeOtherTabs, reorderTabs, getTabCurrentUrl } from './operations.js';
+import { createTab, closeTab, activateTab, refreshTab, duplicateTab, openTabInNewWindow, closeTabsToLeft, closeTabsToRight, closeOtherTabs, reorderTabs, getTabCurrentUrl, switchToNextTab, switchToPrevTab } from './operations.js';
 import { setupSimpleDrag } from './drag-simple.js';
 
 // 初始化事件监听
@@ -17,10 +17,14 @@ export function initTabEvents() {
   setupSimpleDrag(window.tauriTabs.log);
   console.log('✅ setupSimpleDrag 完成');
   
+  // 设置鼠标手势
+  setupMouseGestures();
+  console.log('✅ setupMouseGestures 完成');
+  
   window.tauriTabs.showContextMenu = showTabContextMenu;
   console.log('✅ showContextMenu 设置完成');
   
-  // 添加上下文菜单样式
+  // 添加上下文菜单样式和手势指示器样式
   if (document.head) {
     const contextMenuStyle = document.createElement('style');
     contextMenuStyle.textContent = `
@@ -36,6 +40,21 @@ export function initTabEvents() {
           opacity: 1;
           transform: translateY(0);
         }
+      }
+      
+      /* 鼠标手势指示器 */
+      .tauri-gesture-indicator {
+        position: fixed;
+        background: rgba(0, 102, 204, 0.9);
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        font-size: 24px;
+        z-index: 99999999;
+        pointer-events: none;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+        backdrop-filter: blur(10px);
+        transition: opacity 0.2s;
       }
     `;
     document.head.appendChild(contextMenuStyle);
@@ -599,5 +618,176 @@ function showTabContextMenu(tabId, x, y) {
       }
     });
   }, 100);
+}
+
+// 设置鼠标手势
+function setupMouseGestures() {
+  const log = window.tauriTabs.log;
+  
+  // 手势状态 - 追踪最近的鼠标移动
+  const gestureState = {
+    recentMoves: [], // 存储最近的鼠标位置
+    maxMoves: 30,    // 增加到30个点，降低手速要求
+    maxTime: 500,    // 只保留最近500ms内的移动
+    contextMenuPos: null,
+    indicator: null
+  };
+  
+  const GESTURE_THRESHOLD = 40; // 触发手势的最小滑动距离（像素），降低到40
+  
+  log('🎯 设置鼠标手势监听（基于 contextmenu 事件）');
+  
+  // 创建手势指示器
+  function createGestureIndicator() {
+    if (gestureState.indicator) return gestureState.indicator;
+    
+    const indicator = document.createElement('div');
+    indicator.className = 'tauri-gesture-indicator';
+    indicator.style.opacity = '0';
+    indicator.style.display = 'none';
+    document.body.appendChild(indicator);
+    gestureState.indicator = indicator;
+    return indicator;
+  }
+  
+  // 显示手势指示器
+  function showGestureIndicator(direction, x, y) {
+    const indicator = createGestureIndicator();
+    indicator.textContent = direction === 'left' ? '⬅️' : '➡️';
+    indicator.style.left = `${x + 20}px`;
+    indicator.style.top = `${y - 20}px`;
+    indicator.style.display = 'block';
+    indicator.style.opacity = '1';
+  }
+  
+  // 隐藏手势指示器
+  function hideGestureIndicator() {
+    if (gestureState.indicator) {
+      gestureState.indicator.style.opacity = '0';
+      setTimeout(() => {
+        if (gestureState.indicator) {
+          gestureState.indicator.style.display = 'none';
+        }
+      }, 200);
+    }
+  }
+  
+  // 更新指示器位置
+  function updateGestureIndicator(x, y) {
+    if (gestureState.indicator && gestureState.indicator.style.display !== 'none') {
+      gestureState.indicator.style.left = `${x + 20}px`;
+      gestureState.indicator.style.top = `${y - 20}px`;
+    }
+  }
+  
+  // 不在主文档监听 mousemove，只在 iframe 内部监听
+  
+  // 分析手势：检查最近的鼠标移动轨迹
+  function analyzeGesture(contextX, contextY) {
+    if (gestureState.recentMoves.length < 2) {
+      return null; // 没有足够的移动数据
+    }
+    
+    // 清理过期的移动记录（超过500ms的）
+    const now = Date.now();
+    gestureState.recentMoves = gestureState.recentMoves.filter(m => now - m.time < gestureState.maxTime);
+    
+    if (gestureState.recentMoves.length < 2) {
+      return null;
+    }
+    
+    // 获取最早和最近的位置
+    const firstMove = gestureState.recentMoves[0];
+    const lastMove = gestureState.recentMoves[gestureState.recentMoves.length - 1];
+    
+    const deltaX = lastMove.x - firstMove.x;
+    const deltaY = lastMove.y - firstMove.y;
+    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+    const timeDelta = lastMove.time - firstMove.time;
+    
+    log(`📊 手势分析: 移动距离=${distance.toFixed(1)}px, deltaX=${deltaX.toFixed(1)}px, 时间=${timeDelta}ms, 记录点数=${gestureState.recentMoves.length}`);
+    
+    // 检查是否为有效手势
+    if (distance > GESTURE_THRESHOLD && Math.abs(deltaX) > Math.abs(deltaY)) {
+      // 水平手势
+      const direction = deltaX > 0 ? 'right' : 'left';
+      log(`✅ 识别到${direction === 'right' ? '右' : '左'}滑手势`);
+      return direction;
+    }
+    
+    return null;
+  }
+  
+  
+  // 右键菜单事件 - 核心手势检测逻辑（仅用于 iframe 内部）
+  function handleContextMenu(e) {
+    log(`📋 iframe contextmenu 事件触发，位置: (${e.clientX}, ${e.clientY})`);
+    
+    // 分析手势
+    const gestureDirection = analyzeGesture(e.clientX, e.clientY);
+    
+    if (gestureDirection) {
+      // 检测到手势，阻止右键菜单并执行手势动作
+      e.preventDefault();
+      e.stopPropagation();
+      log('🚫 阻止右键菜单显示（检测到手势滑动）');
+      
+      // 交换方向：右滑=上一个（左边），左滑=下一个（右边）
+      // 这样更符合触摸板/手机的滑动习惯
+      if (gestureDirection === 'right') {
+        log('✅ 触发右滑手势，切换到上一个标签（左边）');
+        switchToPrevTab();
+      } else if (gestureDirection === 'left') {
+        log('✅ 触发左滑手势，切换到下一个标签（右边）');
+        switchToNextTab();
+      }
+      
+      // 清空移动记录
+      gestureState.recentMoves = [];
+      return;
+    }
+    
+    // 没有手势，显示默认的右键菜单
+    log('📋 无手势，显示默认右键菜单');
+    
+    // 清空移动记录
+    gestureState.recentMoves = [];
+  }
+  
+  // 不在主文档监听 contextmenu，只在 iframe 内部监听
+  
+  // 暴露到全局，让 iframe 也能使用
+  window.tauriTabs.setupGestureInIframe = (iframeDoc) => {
+    if (!iframeDoc) return;
+    
+    try {
+      // 在 iframe 内部追踪鼠标移动
+      iframeDoc.addEventListener('mousemove', (e) => {
+        const now = Date.now();
+        gestureState.recentMoves.push({
+          x: e.clientX,
+          y: e.clientY,
+          time: now
+        });
+        
+        // 保留数量限制
+        if (gestureState.recentMoves.length > gestureState.maxMoves) {
+          gestureState.recentMoves.shift();
+        }
+        
+        // 清理过期记录
+        gestureState.recentMoves = gestureState.recentMoves.filter(m => now - m.time < gestureState.maxTime);
+      }, { passive: true });
+      
+      // 在 iframe 内部监听 contextmenu
+      iframeDoc.addEventListener('contextmenu', handleContextMenu, { capture: true, passive: false });
+      
+      log('✅ iframe 手势监听器已安装');
+    } catch (err) {
+      log(`⚠️ 无法在 iframe 内安装手势监听器: ${err.message}`);
+    }
+  };
+  
+  log('✅ 鼠标手势已启用（基于轨迹分析）');
 }
 
