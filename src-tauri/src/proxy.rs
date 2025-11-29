@@ -1,6 +1,6 @@
 use crate::crypto::{encrypt_signature, generate_signature_data};
 use crate::fingerprint::get_device_fingerprint;
-use base64::prelude::*;
+use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -199,7 +199,7 @@ pub async fn proxy_request(
             log!("   文件: {} ({})", file.file_name, file.content_type);
 
             // 解码 base64 文件数据
-            let file_bytes = base64::prelude::BASE64_STANDARD
+            let file_bytes = general_purpose::STANDARD
                 .decode(&file.data)
                 .map_err(|e| format!("Failed to decode file: {}", e))?;
 
@@ -253,7 +253,7 @@ pub async fn proxy_request(
         log!("📦 检测到二进制响应 ({})", content_type);
         let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
         log!("📦 二进制大小: {} bytes", bytes.len());
-        base64::prelude::BASE64_STANDARD.encode(&bytes)
+        general_purpose::STANDARD.encode(&bytes)
     } else {
         // 文本响应：直接获取文本
         log!("📄 检测到文本响应 ({})", content_type);

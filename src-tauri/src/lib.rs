@@ -42,20 +42,22 @@ macro_rules! log {
     };
 }
 
-fn resolve_env_var(key: &str, default_value: &str) -> String {
-    std::env::var(key).unwrap_or_else(|_| default_value.to_string())
-}
-
 fn env_name() -> String {
-    resolve_env_var("TAURI_ENV_NAME", "Backstage68")
+    option_env!("TAURI_ENV_NAME")
+        .unwrap_or("Backstage68")
+        .to_string()
 }
 
 fn env_url() -> String {
-    resolve_env_var("TAURI_ENV_URL", "https://example.com")
+    option_env!("TAURI_ENV_URL")
+        .unwrap_or("https://example.com")
+        .to_string()
 }
 
 fn env_key() -> String {
-    resolve_env_var("TAURI_ENV_KEY", "default")
+    option_env!("TAURI_ENV_KEY")
+        .unwrap_or("default")
+        .to_string()
 }
 
 // 编译时判断是否启用开发者工具
