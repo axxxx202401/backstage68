@@ -626,14 +626,15 @@ function setupMouseGestures() {
   
   // 手势状态 - 追踪最近的鼠标移动
   const gestureState = {
-    recentMoves: [], // 存储最近的鼠标位置
-    maxMoves: 30,    // 增加到30个点，降低手速要求
-    maxTime: 500,    // 只保留最近500ms内的移动
+    recentMoves: [],     // 存储最近的鼠标位置
+    maxMoves: 50,        // 增加记录点数
+    recentWindow: 250,   // 只看最近250ms内的移动（缩短时间窗口）
     contextMenuPos: null,
     indicator: null
   };
   
-  const GESTURE_THRESHOLD = 40; // 触发手势的最小滑动距离（像素），降低到40
+  const GESTURE_THRESHOLD = 80;      // 触发手势的最小滑动距离（像素），提高到80
+  const MIN_VELOCITY = 0.3;          // 最小速度（像素/毫秒），确保是连续滑动
   
   log('🎯 设置鼠标手势监听（基于 contextmenu 事件）');
   
@@ -684,37 +685,44 @@ function setupMouseGestures() {
   
   // 分析手势：检查最近的鼠标移动轨迹
   function analyzeGesture(contextX, contextY) {
-    if (gestureState.recentMoves.length < 2) {
+    const now = Date.now();
+    
+    // 只看最近很短时间内的移动（contextmenu 触发前的移动）
+    const recentMoves = gestureState.recentMoves.filter(m => now - m.time < gestureState.recentWindow);
+    
+    if (recentMoves.length < 3) {
+      log(`📊 手势分析: 记录点太少 (${recentMoves.length}), 不是手势`);
       return null; // 没有足够的移动数据
     }
     
-    // 清理过期的移动记录（超过500ms的）
-    const now = Date.now();
-    gestureState.recentMoves = gestureState.recentMoves.filter(m => now - m.time < gestureState.maxTime);
-    
-    if (gestureState.recentMoves.length < 2) {
-      return null;
-    }
-    
     // 获取最早和最近的位置
-    const firstMove = gestureState.recentMoves[0];
-    const lastMove = gestureState.recentMoves[gestureState.recentMoves.length - 1];
+    const firstMove = recentMoves[0];
+    const lastMove = recentMoves[recentMoves.length - 1];
     
     const deltaX = lastMove.x - firstMove.x;
     const deltaY = lastMove.y - firstMove.y;
     const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
     const timeDelta = lastMove.time - firstMove.time;
     
-    log(`📊 手势分析: 移动距离=${distance.toFixed(1)}px, deltaX=${deltaX.toFixed(1)}px, 时间=${timeDelta}ms, 记录点数=${gestureState.recentMoves.length}`);
+    // 计算平均速度
+    const velocity = timeDelta > 0 ? distance / timeDelta : 0;
     
-    // 检查是否为有效手势
-    if (distance > GESTURE_THRESHOLD && Math.abs(deltaX) > Math.abs(deltaY)) {
+    log(`📊 手势分析: 移动=${distance.toFixed(1)}px, deltaX=${deltaX.toFixed(1)}px, 时间=${timeDelta}ms, 速度=${velocity.toFixed(2)}px/ms, 点数=${recentMoves.length}`);
+    
+    // 检查是否为有效手势：
+    // 1. 距离足够长
+    // 2. 主要是水平方向
+    // 3. 速度足够快（确保是连续滑动）
+    if (distance > GESTURE_THRESHOLD && 
+        Math.abs(deltaX) > Math.abs(deltaY) * 1.5 && 
+        velocity > MIN_VELOCITY) {
       // 水平手势
       const direction = deltaX > 0 ? 'right' : 'left';
       log(`✅ 识别到${direction === 'right' ? '右' : '左'}滑手势`);
       return direction;
     }
     
+    log(`❌ 不是有效手势: distance=${distance.toFixed(1)}<${GESTURE_THRESHOLD} or velocity=${velocity.toFixed(2)}<${MIN_VELOCITY}`);
     return null;
   }
   
@@ -775,8 +783,8 @@ function setupMouseGestures() {
           gestureState.recentMoves.shift();
         }
         
-        // 清理过期记录
-        gestureState.recentMoves = gestureState.recentMoves.filter(m => now - m.time < gestureState.maxTime);
+        // 清理过期记录（保留1秒内的，但判断时只用最近250ms的）
+        gestureState.recentMoves = gestureState.recentMoves.filter(m => now - m.time < 1000);
       }, { passive: true });
       
       // 在 iframe 内部监听 contextmenu
