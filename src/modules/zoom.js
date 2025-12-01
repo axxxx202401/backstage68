@@ -62,26 +62,16 @@ export function initZoom(log) {
       }
       showZoomIndicator(zoom);
       
-      if (window.self === window.top && window.tauriTabs && window.tauriTabs.activeTabId) {
-        const activeTab = window.tauriTabs.tabs.find(t => t.id === window.tauriTabs.activeTabId);
-        if (activeTab && activeTab.iframe) {
-          try {
-            const iframeDoc = activeTab.iframe.contentDocument || activeTab.iframe.contentWindow.document;
-            if (iframeDoc && iframeDoc.body) {
-              iframeDoc.body.style.zoom = zoom;
-              return;
-            }
-          } catch (e) {
-            // Ignore
-          }
-        }
-      }
-      
-      if (document.body) {
-        document.body.style.zoom = zoom;
+      // 通过 Rust command 调用 Tauri 原生缩放（缩放整个窗口包括标签栏）
+      if (window.__TAURI__ && window.__TAURI__.core) {
+        await window.__TAURI__.core.invoke('set_zoom', { zoomLevel: zoom });
+        log(`✅ 已应用 Tauri 原生缩放: ${Math.round(zoom * 100)}%`);
+      } else {
+        log.error("⚠️ Tauri API 不可用");
       }
     } catch (err) {
       log.error("缩放失败:", err);
+      console.error("缩放失败:", err);
     }
   }
 

@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "system:webview",
+  "description": "Webview zoom permissions for all URLs including remote",
+  "local": false,
+  "windows": ["main"],
+  "permissions": [
+    {
+      "identifier": "core:webview:allow-set-webview-zoom",
+      "allow": [
+        { "url": "https://**" },
+        { "url": "http://**" },
+        { "url": "tauri://**" }
+      ]
+    }
+  ]
+}
+
