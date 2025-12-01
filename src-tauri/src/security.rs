@@ -1,6 +1,5 @@
 /// 安全检测模块
 /// 包含反调试、虚拟机检测、环境安全评分等功能
-
 use std::process::Command;
 
 /// 安全评分（0-100）
@@ -78,7 +77,7 @@ fn check_vm() -> bool {
                 // VirtualBox: 08:00:27
                 // VMware: 00:0c:29, 00:50:56, 00:05:69
                 // Parallels: 00:1c:42
-                !(text.contains("08:00:27") 
+                !(text.contains("08:00:27")
                     || text.contains("00:0c:29")
                     || text.contains("00:50:56")
                     || text.contains("00:1c:42"))
@@ -104,9 +103,9 @@ fn check_environment_indicators() -> bool {
 /// 根据安全评分决定安全级别
 #[derive(Debug, PartialEq)]
 pub enum SecurityLevel {
-    Safe,      // 90-100: 完全安全
-    Warning,   // 70-89:  可疑
-    Danger,    // 0-69:   危险
+    Safe,    // 90-100: 完全安全
+    Warning, // 70-89:  可疑
+    Danger,  // 0-69:   危险
 }
 
 impl SecurityScore {
@@ -118,4 +117,3 @@ impl SecurityScore {
         }
     }
 }
-

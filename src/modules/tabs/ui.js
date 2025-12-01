@@ -7,7 +7,8 @@ const TAB_CONFIG = {
   tabBarHeight: 40,
   minTabWidth: 40,
   maxTabWidth: 200,
-  defaultTabWidth: 200
+  defaultTabWidth: 200,
+  enableCloseButton: true
 };
 
 // 创建标签栏
@@ -97,6 +98,7 @@ function createStyles() {
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      pointer-events: none; /* 关键：让拖放事件穿透到父元素 */
     }
     .tauri-tab.active .tauri-tab-title { color: #ffffff; }
     .tauri-tab-close {
@@ -111,6 +113,7 @@ function createStyles() {
       justify-content: center;
       border-radius: 3px;
       flex-shrink: 0;
+      pointer-events: auto; /* 保留关闭按钮的点击功能 */
     }
     .tauri-tab-close:hover {
       background: rgba(255,255,255,0.2);
@@ -151,13 +154,42 @@ function createStyles() {
       display: none;
     }
     .tauri-tab-iframe.active { display: block; }
+    
+    /* 拖动状态 */
     .tauri-tab.dragging {
       opacity: 0.5;
-      cursor: grabbing;
+      cursor: grabbing !important;
+      transform: rotate(-2deg);
+      transition: transform 0.2s, opacity 0.2s;
     }
     .tauri-tab.drag-over {
       background: rgba(255,255,255,0.25);
-      border-left: 2px solid #0066cc;
+      border-left: 3px solid #0066cc;
+      padding-left: 5px;
+    }
+    
+    /* 拖出窗口准备状态 */
+    .tauri-tab.tear-off-ready {
+      background: rgba(0, 102, 204, 0.3) !important;
+      box-shadow: 0 0 20px rgba(0, 102, 204, 0.6);
+      border: 2px solid rgba(0, 102, 204, 0.8);
+      animation: tearOffPulse 0.8s ease-in-out infinite;
+    }
+    
+    /* 强制拖出模式（Shift键） */
+    .tauri-tab.force-tear-off {
+      background: rgba(255, 153, 0, 0.3) !important;
+      box-shadow: 0 0 20px rgba(255, 153, 0, 0.6);
+      border: 2px solid rgba(255, 153, 0, 0.8);
+    }
+    
+    @keyframes tearOffPulse {
+      0%, 100% {
+        box-shadow: 0 0 20px rgba(0, 102, 204, 0.6);
+      }
+      50% {
+        box-shadow: 0 0 30px rgba(0, 102, 204, 0.9);
+      }
     }
   `;
   document.head.appendChild(style);

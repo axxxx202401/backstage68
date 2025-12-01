@@ -30,11 +30,7 @@ import { initTabs } from './modules/tabs/manager.js';
   const log = initLogger();
   log("🚀 Tauri 注入脚本启动（重构版）");
 
-  // 检查是否在 iframe 内
-  if (isInIframe()) {
-    log("⚠️  检测到在 iframe 内，跳过初始化");
-    return;
-  }
+  const isIframe = isInIframe();
 
   // 检查 Tauri API
   if (!window.__TAURI__ || !window.__TAURI__.core || !window.__TAURI__.core.invoke) {
@@ -44,6 +40,17 @@ import { initTabs } from './modules/tabs/manager.js';
 
   const invoke = window.__TAURI__.core.invoke;
   log("✅ Tauri API 准备就绪");
+
+  if (isIframe) {
+    log("⚠️  当前处于 iframe，上线轻量模式：仅启用代理模块");
+    try {
+      initProxy(log, invoke);
+      log("✅ iframe 代理模块已启用");
+    } catch (err) {
+      console.error("❌ iframe 代理模块初始化失败:", err);
+    }
+    return;
+  }
 
   // 初始化各模块
   try {

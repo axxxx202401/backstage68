@@ -133,7 +133,7 @@ Write-Section "   Tauri Windows Build" "Green"
 Write-Section "====================================" "Green"
 Write-Host ""
 
-$envFile = "env.$Environment"
+$envFile = ".env.$Environment"
 if (-not (Test-Path $envFile)) {
     Write-Section "[ERR] Missing environment file: $envFile" "Red"
     exit 1
@@ -156,6 +156,15 @@ Get-Content -LiteralPath $envFile -Encoding UTF8 | ForEach-Object {
     $envMap[$name] = $value
     [Environment]::SetEnvironmentVariable($name, $value, "Process")
     Write-Host ("   {0} = {1}" -f $name, $value)
+}
+
+Write-Host ""
+
+Write-Section "[BUILD] Running npm run build..." "Yellow"
+npm run build
+if ($LASTEXITCODE -ne 0) {
+    Write-Section "[FAIL] npm run build failed" "Red"
+    exit $LASTEXITCODE
 }
 
 Write-Host ""

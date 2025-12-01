@@ -6,12 +6,11 @@ import { TAB_CONFIG, updateTabWidths } from './ui.js';
 
 // 创建标签 DOM 元素
 export function createTabElement(id, title, callbacks) {
-  const { onClose, onSwitch, onContextMenu, onDragEvents } = callbacks;
+  const { onClose, onSwitch, onContextMenu } = callbacks;
   
   const tab = document.createElement('div');
   tab.className = 'tauri-tab';
   tab.dataset.tabId = id;
-  tab.setAttribute('draggable', 'true');
   
   const titleSpan = document.createElement('span');
   titleSpan.className = 'tauri-tab-title';
@@ -31,20 +30,12 @@ export function createTabElement(id, title, callbacks) {
   }
   
   tab.addEventListener('click', () => onSwitch(id));
-  tab.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    onContextMenu(id, e.clientX, e.clientY);
-  });
   
-  // 拖动事件
-  if (onDragEvents) {
-    tab.addEventListener('dragstart', (e) => onDragEvents.dragStart(e, id, tab));
-    tab.addEventListener('dragend', (e) => onDragEvents.dragEnd(e, id, tab));
-    tab.addEventListener('dragover', (e) => onDragEvents.dragOver(e, tab));
-    tab.addEventListener('dragleave', (e) => onDragEvents.dragLeave(e, tab));
-    tab.addEventListener('drop', (e) => onDragEvents.drop(e, id, tab));
-  }
+  // 不在这里绑定 contextmenu，改为在全局手势系统中处理
+  // 只需要标记 tab 的 id，让全局处理器知道点击的是哪个标签
+  tab.dataset.tabId = id;
+  
+  // 不再需要 HTML5 drag 事件监听器，改用鼠标事件
   
   return tab;
 }
@@ -58,6 +49,35 @@ export function createIframeContainer() {
 }
 
 // 创建 iframe
+function inheritIframeProxy(iframe, log) {
+  const MAX_ATTEMPTS = 5;
+  let attempt = 0;
+
+  function applyProxy() {
+    attempt++;
+    try {
+      const iframeWindow = iframe.contentWindow;
+      if (!iframeWindow) {
+        throw new Error('contentWindow 不可用');
+      }
+      iframeWindow.fetch = window.fetch;
+      iframeWindow.XMLHttpRequest = window.XMLHttpRequest;
+      log(`✅ iframe 已继承父窗口的代理 (第 ${attempt} 次尝试)`);
+      return true;
+    } catch (err) {
+      if (attempt < MAX_ATTEMPTS) {
+        log(`⏳ iframe 代理未就绪，准备重试 (${attempt}/${MAX_ATTEMPTS})`);
+        setTimeout(applyProxy, 100 * attempt);
+      } else {
+        log(`⚠️  无法设置 iframe 代理: ${err.message}`);
+      }
+      return false;
+    }
+  }
+
+  applyProxy();
+}
+
 export function createIframe(url, log) {
   const container = document.querySelector('.tauri-iframe-container') || createIframeContainer();
   
@@ -69,23 +89,21 @@ export function createIframe(url, log) {
   
   // iframe 加载完成后，设置代理和事件监听
   iframe.addEventListener('load', () => {
+    inheritIframeProxy(iframe, log);
     try {
-      const iframeWindow = iframe.contentWindow;
       const iframeDoc = iframe.contentDocument;
-      
-      if (iframeWindow && iframeDoc && window.self === window.top) {
-        // 用父窗口的代理替换 iframe 的 fetch 和 XHR
-        iframeWindow.fetch = window.fetch;
-        iframeWindow.XMLHttpRequest = window.XMLHttpRequest;
-        log(`✅ iframe 已继承父窗口的代理`);
-        
+      if (iframeDoc && window.self === window.top) {
         // 在 iframe 内部添加键盘事件监听器
         setupIframeEvents(iframeDoc, log);
-        
         log(`✅ iframe 事件监听器已安装`);
+        
+        // 在 iframe 内部添加手势监听器
+        if (window.tauriTabs && window.tauriTabs.setupGestureInIframe) {
+          window.tauriTabs.setupGestureInIframe(iframeDoc);
+        }
       }
     } catch (err) {
-      log(`⚠️  无法设置 iframe: ${err.message}`);
+      log(`⚠️  处理 iframe 事件失败: ${err.message}`);
     }
   });
   
@@ -181,8 +199,7 @@ export function createTab(url) {
   const tabElement = createTabElement(id, title, {
     onClose: closeTab,
     onSwitch: activateTab,
-    onContextMenu: window.tauriTabs.showContextMenu || (() => {}),
-    onDragEvents: window.tauriTabs.dragEvents || null
+    onContextMenu: window.tauriTabs.showContextMenu || (() => {})
   });
   
   const iframe = createIframe(url, log);
@@ -356,6 +373,35 @@ export function refreshTab(tabId) {
   tab.iframe.src = tab.iframe.src;
 }
 
+export function getTabCurrentUrl(tab, log) {
+  if (!tab) {
+    return window.location.href;
+  }
+  
+  let currentUrl = tab.url || window.location.href;
+  
+  if (!tab.iframe) {
+    return currentUrl;
+  }
+  
+  try {
+    const iframeWindow = tab.iframe.contentWindow;
+    const href = iframeWindow?.location?.href;
+    if (href) {
+      if (log) {
+        log(`   使用 iframe 当前 URL: ${href}`);
+      }
+      return href;
+    }
+  } catch (err) {
+    if (log) {
+      log(`   无法获取 iframe 当前 URL，使用原始 URL: ${currentUrl}`);
+    }
+  }
+  
+  return currentUrl;
+}
+
 // 复制标签
 export function duplicateTab(tabId) {
   const tab = window.tauriTabs.tabs.find(t => t.id === tabId);
@@ -371,16 +417,7 @@ export function duplicateTab(tabId) {
   
   log(`📋 复制标签: ${tabId}, URL: ${tab.url}`);
   
-  let currentUrl = tab.url;
-  try {
-    const iframeWindow = tab.iframe.contentWindow;
-    if (iframeWindow && iframeWindow.location && iframeWindow.location.href) {
-      currentUrl = iframeWindow.location.href;
-      log(`   使用 iframe 当前 URL: ${currentUrl}`);
-    }
-  } catch (err) {
-    log(`   无法获取 iframe 当前 URL，使用原始 URL: ${tab.url}`);
-  }
+  const currentUrl = getTabCurrentUrl(tab, log);
   
   createTab(currentUrl);
 }
@@ -389,16 +426,18 @@ export function duplicateTab(tabId) {
 export async function openTabInNewWindow(tabId) {
   const tab = window.tauriTabs.tabs.find(t => t.id === tabId);
   const log = window.tauriTabs.log;
-  const invoke = window.tauriTabs.invoke;
   
   if (!tab) return;
   
   log(`🪟 在新窗口打开: ${tab.url}`);
   try {
-    await invoke('create_new_window', { 
-      currentUrl: tab.url,
-      storageData: null
-    });
+    const currentUrl = getTabCurrentUrl(tab, log);
+
+    if (window.tauriOpenNewWindow) {
+      await window.tauriOpenNewWindow(currentUrl);
+    } else {
+      log('❌ 无法打开新窗口：tauriOpenNewWindow 未初始化');
+    }
   } catch (err) {
     console.error('Failed to open new window:', err);
   }
@@ -453,7 +492,10 @@ export function reorderTabs(draggedId, targetId) {
   const draggedIndex = tabs.findIndex(t => t.id === draggedId);
   const targetIndex = tabs.findIndex(t => t.id === targetId);
   
-  if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) return;
+  if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) {
+    log(`⚠️ 重新排序失败: draggedIndex=${draggedIndex}, targetIndex=${targetIndex}`);
+    return;
+  }
   
   log(`🔄 标签重新排序: ${draggedId} (索引 ${draggedIndex}) 移动到 ${targetId} (索引 ${targetIndex})`);
   
@@ -465,11 +507,14 @@ export function reorderTabs(draggedId, targetId) {
   const tabsContainer = document.querySelector('.tauri-tabs-container');
   const newTabBtn = tabsContainer.querySelector('.tauri-new-tab');
   
-  // 清空标签容器（保留新建按钮）
-  Array.from(tabsContainer.children).forEach(child => {
-    if (!child.classList.contains('tauri-new-tab')) {
-      child.remove();
-    }
+  if (!tabsContainer || !newTabBtn) {
+    log('❌ 找不到标签容器或新建按钮');
+    return;
+  }
+  
+  // 只移除标签元素（不移除按钮和其他控件）
+  Array.from(tabsContainer.querySelectorAll('.tauri-tab')).forEach(tabEl => {
+    tabEl.remove();
   });
   
   // 按新顺序添加标签
@@ -478,7 +523,7 @@ export function reorderTabs(draggedId, targetId) {
   });
   
   updateTabWidths();
-  log(`✅ 标签重新排序完成`);
+  log(`✅ 标签重新排序完成，新顺序: ${tabs.map(t => t.id).join(', ')}`);
 }
 
 // 更新标签标题
@@ -506,6 +551,44 @@ export function updateTabTitle(id, title) {
   if (id === window.tauriTabs.activeTabId) {
     updateMainWindowTitle(title);
   }
+}
+
+// 切换到下一个标签（向右）
+export function switchToNextTab() {
+  const tabs = window.tauriTabs.tabs;
+  const currentId = window.tauriTabs.activeTabId;
+  const log = window.tauriTabs.log;
+  
+  if (!currentId || tabs.length <= 1) return;
+  
+  const currentIndex = tabs.findIndex(t => t.id === currentId);
+  if (currentIndex === -1) return;
+  
+  // 循环到下一个标签，如果是最后一个则回到第一个
+  const nextIndex = (currentIndex + 1) % tabs.length;
+  const nextTab = tabs[nextIndex];
+  
+  log(`➡️ 手势切换到下一个标签: ${nextTab.id}`);
+  activateTab(nextTab.id);
+}
+
+// 切换到上一个标签（向左）
+export function switchToPrevTab() {
+  const tabs = window.tauriTabs.tabs;
+  const currentId = window.tauriTabs.activeTabId;
+  const log = window.tauriTabs.log;
+  
+  if (!currentId || tabs.length <= 1) return;
+  
+  const currentIndex = tabs.findIndex(t => t.id === currentId);
+  if (currentIndex === -1) return;
+  
+  // 循环到上一个标签，如果是第一个则回到最后一个
+  const prevIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+  const prevTab = tabs[prevIndex];
+  
+  log(`⬅️ 手势切换到上一个标签: ${prevTab.id}`);
+  activateTab(prevTab.id);
 }
 
 // 更新主窗口标题

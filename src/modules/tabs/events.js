@@ -1,16 +1,30 @@
 /**
- * 标签页事件模块 - 键盘快捷键、拖拽、右键菜单
+ * 标签页事件模块 - 键盘快捷键、拖拽、右键菜单、鼠标手势
  */
 
-import { createTab, closeTab, activateTab, refreshTab, duplicateTab, openTabInNewWindow, closeTabsToLeft, closeTabsToRight, closeOtherTabs, reorderTabs } from './operations.js';
+import { createTab, closeTab, activateTab, refreshTab, duplicateTab, openTabInNewWindow, closeTabsToLeft, closeTabsToRight, closeOtherTabs, reorderTabs, getTabCurrentUrl, switchToNextTab, switchToPrevTab } from './operations.js';
+import { setupSimpleDrag } from './drag-simple.js';
 
 // 初始化事件监听
 export function initTabEvents() {
-  setupKeyboardShortcuts();
-  setupDragEvents();
-  window.tauriTabs.showContextMenu = showTabContextMenu;
+  console.log('🔧 initTabEvents 开始执行...');
+  console.log('🔧 window.tauriTabs:', window.tauriTabs);
   
-  // 添加上下文菜单样式
+  setupKeyboardShortcuts();
+  console.log('✅ setupKeyboardShortcuts 完成');
+  
+  // 使用简单的鼠标拖动系统
+  setupSimpleDrag(window.tauriTabs.log);
+  console.log('✅ setupSimpleDrag 完成');
+  
+  // 设置鼠标手势
+  setupMouseGestures();
+  console.log('✅ setupMouseGestures 完成');
+  
+  window.tauriTabs.showContextMenu = showTabContextMenu;
+  console.log('✅ showContextMenu 设置完成');
+  
+  // 添加上下文菜单样式和手势指示器样式
   if (document.head) {
     const contextMenuStyle = document.createElement('style');
     contextMenuStyle.textContent = `
@@ -26,6 +40,21 @@ export function initTabEvents() {
           opacity: 1;
           transform: translateY(0);
         }
+      }
+      
+      /* 鼠标手势指示器 */
+      .tauri-gesture-indicator {
+        position: fixed;
+        background: rgba(0, 102, 204, 0.9);
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        font-size: 24px;
+        z-index: 99999999;
+        pointer-events: none;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+        backdrop-filter: blur(10px);
+        transition: opacity 0.2s;
       }
     `;
     document.head.appendChild(contextMenuStyle);
@@ -96,50 +125,388 @@ function setupKeyboardShortcuts() {
 
 // 拖拽事件
 function setupDragEvents() {
+  console.log('🚀 setupDragEvents 开始执行...');
   const log = window.tauriTabs.log;
+  console.log('📋 log 函数:', typeof log);
+  
+  // 拖动状态追踪
+  let dragState = {
+    isDragging: false,
+    draggedTabId: null,
+    draggedTab: null,
+    lastPosition: { x: 0, y: 0 },
+    shiftKeyPressed: false,
+    isOutsideWindow: false,
+    previewWindow: null
+  };
+  
+  // 创建拖出提示元素
+  function createTearOffIndicator() {
+    if (document.getElementById('tauri-tearoff-indicator')) return;
+    
+    const indicator = document.createElement('div');
+    indicator.id = 'tauri-tearoff-indicator';
+    indicator.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0, 102, 204, 0.95);
+      color: white;
+      padding: 16px 24px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 500;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      z-index: 99999999;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+      backdrop-filter: blur(10px);
+    `;
+    indicator.innerHTML = '🪟 释放以创建新窗口';
+    document.body.appendChild(indicator);
+  }
+  
+  // 显示/隐藏拖出提示
+  function showTearOffIndicator(show) {
+    const indicator = document.getElementById('tauri-tearoff-indicator');
+    if (indicator) {
+      indicator.style.opacity = show ? '1' : '0';
+    }
+  }
+  
+  // 创建浮动预览窗口
+  function createFloatingPreview(tab) {
+    if (dragState.previewWindow) return;
+    
+    const preview = document.createElement('div');
+    preview.id = 'tauri-floating-preview';
+    preview.style.cssText = `
+      position: fixed;
+      width: 300px;
+      height: 200px;
+      background: rgba(40, 40, 40, 0.95);
+      border: 2px solid rgba(0, 102, 204, 0.8);
+      border-radius: 12px;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+      z-index: 99999998;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+      backdrop-filter: blur(20px);
+      overflow: hidden;
+    `;
+    
+    const title = tab.querySelector('.tauri-tab-title')?.textContent || '新窗口';
+    preview.innerHTML = `
+      <div style="padding: 16px; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+        <div style="font-size: 48px; margin-bottom: 12px;">🪟</div>
+        <div style="color: white; font-size: 14px; font-weight: 500; text-align: center;">${title}</div>
+        <div style="color: rgba(255,255,255,0.6); font-size: 12px; margin-top: 8px;">新窗口</div>
+      </div>
+    `;
+    
+    document.body.appendChild(preview);
+    dragState.previewWindow = preview;
+    
+    // 淡入效果
+    setTimeout(() => {
+      preview.style.opacity = '1';
+    }, 50);
+  }
+  
+  // 移除浮动预览
+  function removeFloatingPreview() {
+    if (dragState.previewWindow) {
+      dragState.previewWindow.style.opacity = '0';
+      setTimeout(() => {
+        if (dragState.previewWindow) {
+          dragState.previewWindow.remove();
+          dragState.previewWindow = null;
+        }
+      }, 200);
+    }
+  }
+  
+  // 更新浮动预览位置
+  function updateFloatingPreviewPosition(x, y) {
+    if (dragState.previewWindow) {
+      dragState.previewWindow.style.left = `${x + 20}px`;
+      dragState.previewWindow.style.top = `${y + 20}px`;
+    }
+  }
+  
+  // 检测是否拖出窗口
+  function checkIfOutsideWindow(x, y) {
+    const THRESHOLD = 50; // 超出阈值（降低到50px，更容易触发）
+    const windowWidth = window.innerWidth;
+    const windowHeight = window.innerHeight;
+    
+    const isOutside = 
+      x < -THRESHOLD || 
+      x > windowWidth + THRESHOLD || 
+      y < -THRESHOLD || 
+      y > windowHeight + THRESHOLD;
+    
+    if (isOutside !== dragState.isOutsideWindow) {
+      dragState.isOutsideWindow = isOutside;
+      
+      if (isOutside) {
+        log(`🌊 标签拖出窗口边界 (位置: ${x}, ${y}, 窗口: ${windowWidth}x${windowHeight})`);
+        dragState.draggedTab?.classList.add('tear-off-ready');
+        showTearOffIndicator(true);
+        createFloatingPreview(dragState.draggedTab);
+      } else {
+        log('🔙 标签返回窗口内');
+        dragState.draggedTab?.classList.remove('tear-off-ready');
+        showTearOffIndicator(false);
+        removeFloatingPreview();
+      }
+    }
+  }
+  
+  // 全局拖动监听（用于追踪位置）
+  document.addEventListener('drag', (e) => {
+    if (!dragState.isDragging) return;
+    
+    // 更新位置（drag 事件中 clientX/Y 可能为 0，所以只在非0时更新）
+    if (e.clientX !== 0 && e.clientY !== 0) {
+      dragState.lastPosition = { x: e.clientX, y: e.clientY };
+      checkIfOutsideWindow(e.clientX, e.clientY);
+      updateFloatingPreviewPosition(e.clientX, e.clientY);
+    }
+  }, true);
+  
+  // 额外的 dragover 监听（确保位置追踪）
+  document.addEventListener('dragover', (e) => {
+    if (!dragState.isDragging) return;
+    
+    if (e.clientX !== 0 && e.clientY !== 0) {
+      dragState.lastPosition = { x: e.clientX, y: e.clientY };
+      checkIfOutsideWindow(e.clientX, e.clientY);
+      updateFloatingPreviewPosition(e.clientX, e.clientY);
+    }
+  }, true);
+  
+  // 监听 Shift 键
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Shift' && dragState.isDragging) {
+      dragState.shiftKeyPressed = true;
+      dragState.draggedTab?.classList.add('force-tear-off');
+      log('⌨️ Shift 键按下，强制拖出模式');
+    }
+  }, true);
+  
+  document.addEventListener('keyup', (e) => {
+    if (e.key === 'Shift') {
+      dragState.shiftKeyPressed = false;
+      dragState.draggedTab?.classList.remove('force-tear-off');
+    }
+  }, true);
+  
+  // 创建拖出提示
+  createTearOffIndicator();
+  
+  // 在标签容器上添加全局 dragover（确保可以接收 drop）
+  const setupContainerDragListeners = () => {
+    const tabsContainer = document.querySelector('.tauri-tabs-container');
+    console.log('🔍 setupContainerDragListeners - 查找容器:', tabsContainer ? '找到' : '未找到');
+    
+    if (tabsContainer) {
+      tabsContainer.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+      }, false);
+      
+      log('✅ 标签容器拖动监听已设置');
+      console.log('✅ 标签容器拖动监听已设置');
+    } else {
+      // 容器还未创建，稍后重试
+      console.log('⏳ 容器未找到，100ms 后重试...');
+      setTimeout(setupContainerDragListeners, 100);
+    }
+  };
+  setupContainerDragListeners();
   
   window.tauriTabs.dragEvents = {
     dragStart: (e, id, tab) => {
+      console.log('🎯 dragStart 触发！', { id, tab, dragEvents: window.tauriTabs.dragEvents });
+      
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', id);
+      
+      // 设置拖动图像（可选）
+      try {
+        const dragImage = tab.cloneNode(true);
+        dragImage.style.opacity = '0.8';
+        dragImage.style.transform = 'rotate(-3deg)';
+        document.body.appendChild(dragImage);
+        dragImage.style.position = 'absolute';
+        dragImage.style.left = '-9999px';
+        e.dataTransfer.setDragImage(dragImage, 0, 0);
+        setTimeout(() => dragImage.remove(), 0);
+      } catch (err) {
+        // 忽略拖动图像错误
+      }
+      
       tab.style.opacity = '0.5';
       tab.classList.add('dragging');
-      log(`🖱️ 开始拖动标签: ${id}`);
+      
+      dragState.isDragging = true;
+      dragState.draggedTabId = id;
+      dragState.draggedTab = tab;
+      dragState.lastPosition = { x: e.clientX, y: e.clientY };
+      dragState.shiftKeyPressed = e.shiftKey;
+      
+      console.log('🖱️ 开始拖动标签:', id, 'Shift:', e.shiftKey);
+      log(`🖱️ 开始拖动标签: ${id}, Shift: ${e.shiftKey}`);
     },
     
-    dragEnd: (e, id, tab) => {
+    dragEnd: async (e, id, tab) => {
+      log(`🖱️ dragEnd 触发: ${id}, 位置: (${e.clientX}, ${e.clientY})`);
+      log(`   最后记录位置: (${dragState.lastPosition.x}, ${dragState.lastPosition.y})`);
+      log(`   isOutsideWindow: ${dragState.isOutsideWindow}, shiftKey: ${dragState.shiftKeyPressed}`);
+      
       tab.style.opacity = '1';
-      tab.classList.remove('dragging');
+      tab.classList.remove('dragging', 'tear-off-ready', 'force-tear-off');
+      
       document.querySelectorAll('.tauri-tab.drag-over').forEach(t => {
         t.classList.remove('drag-over');
       });
-      log(`🖱️ 结束拖动标签: ${id}`);
+      
+      // 使用最后记录的位置（因为 dragend 的 clientX/Y 可能不准确）
+      const finalX = e.clientX || dragState.lastPosition.x;
+      const finalY = e.clientY || dragState.lastPosition.y;
+      
+      // 检查是否拖出窗口或按住 Shift
+      const shouldTearOff = dragState.isOutsideWindow || dragState.shiftKeyPressed;
+      
+      if (shouldTearOff) {
+        log(`🪟 拖出窗口！创建新窗口...`);
+        showTearOffIndicator(false);
+        
+        // 添加飞出动画
+        tab.style.transition = 'transform 0.3s ease-out, opacity 0.3s';
+        tab.style.transform = 'scale(0.8) translateY(-20px)';
+        tab.style.opacity = '0';
+        
+        await tearOffTab(id);
+        
+        // 动画结束后恢复
+        setTimeout(() => {
+          tab.style.transition = '';
+          tab.style.transform = '';
+          tab.style.opacity = '1';
+        }, 300);
+      } else {
+        log(`🖱️ 结束拖动标签: ${id} (窗口内)`);
+      }
+      
+      // 清理状态
+      removeFloatingPreview();
+      dragState.isDragging = false;
+      dragState.draggedTabId = null;
+      dragState.draggedTab = null;
+      dragState.isOutsideWindow = false;
+      dragState.shiftKeyPressed = false;
     },
     
-    dragOver: (e, tab) => {
+    dragOver: (e, id, tab) => {
+      console.log('📍 dragOver 触发！', { id, isDragging: dragState.isDragging, draggedId: dragState.draggedTabId });
+      
       e.preventDefault();
+      e.stopPropagation();
       e.dataTransfer.dropEffect = 'move';
-      if (!tab.classList.contains('dragging')) {
+      
+      // 窗口内排序：添加高亮
+      if (!tab.classList.contains('dragging') && !dragState.isOutsideWindow) {
         tab.classList.add('drag-over');
+      }
+      
+      // 调试日志
+      if (dragState.isDragging && dragState.draggedTabId !== id) {
+        // 只在拖到不同标签时输出一次
+        if (!tab.dataset.dragOverLogged) {
+          console.log(`📍 dragOver: 拖动 ${dragState.draggedTabId} 到 ${id} 上方`);
+          log(`📍 dragOver: 拖动 ${dragState.draggedTabId} 到 ${id} 上方`);
+          tab.dataset.dragOverLogged = 'true';
+        }
       }
     },
     
-    dragLeave: (e, tab) => {
+    dragLeave: (e, id, tab) => {
       tab.classList.remove('drag-over');
+      delete tab.dataset.dragOverLogged;
     },
     
     drop: (e, id, tab) => {
+      log(`📍 drop 事件触发！目标: ${id}`);
+      
       e.preventDefault();
       e.stopPropagation();
       tab.classList.remove('drag-over');
+      delete tab.dataset.dragOverLogged;
       
       const draggedId = e.dataTransfer.getData('text/plain');
-      if (draggedId && draggedId !== id) {
-        log(`📍 放置标签: ${draggedId} -> ${id}`);
-        reorderTabs(draggedId, id);
+      log(`   draggedId=${draggedId}, targetId=${id}, isOutside=${dragState.isOutsideWindow}`);
+      
+      // 只有在窗口内才执行重新排序
+      if (!dragState.isOutsideWindow && draggedId && draggedId !== id) {
+        log(`✅ 执行重新排序: ${draggedId} -> ${id}`);
+        try {
+          reorderTabs(draggedId, id);
+        } catch (err) {
+          log(`❌ 重新排序失败: ${err.message}`);
+          console.error(err);
+        }
+      } else {
+        if (dragState.isOutsideWindow) {
+          log(`   跳过排序：标签在窗口外`);
+        } else if (!draggedId) {
+          log(`   跳过排序：draggedId 为空`);
+        } else if (draggedId === id) {
+          log(`   跳过排序：拖到自己身上`);
+        }
       }
     }
   };
+  
+  // 撕扯标签创建新窗口
+  async function tearOffTab(tabId) {
+    const tabs = window.tauriTabs.tabs;
+    const tab = tabs.find(t => t.id === tabId);
+    
+    if (!tab) return;
+    
+    try {
+      const currentUrl = getTabCurrentUrl(tab, log);
+      
+      log(`🚀 创建新窗口: ${currentUrl}`);
+      
+      if (window.tauriOpenNewWindow) {
+        await window.tauriOpenNewWindow(currentUrl);
+      } else {
+        log('❌ 无法创建新窗口，tauriOpenNewWindow 未初始化');
+        return;
+      }
+      
+      // 如果不是最后一个标签，关闭当前标签
+      if (tabs.length > 1) {
+        closeTab(tabId);
+        log(`✅ 已从当前窗口移除标签`);
+      } else {
+        log(`ℹ️ 保留最后一个标签`);
+      }
+    } catch (err) {
+      console.error('❌ 创建新窗口失败:', err);
+    }
+  }
+  
+  console.log('✅ setupDragEvents 完成！dragEvents 已设置:', window.tauriTabs.dragEvents ? '成功' : '失败');
+  console.log('   dragStart:', typeof window.tauriTabs.dragEvents?.dragStart);
+  console.log('   dragOver:', typeof window.tauriTabs.dragEvents?.dragOver);
+  console.log('   drop:', typeof window.tauriTabs.dragEvents?.drop);
 }
 
 // 显示右键菜单
@@ -251,5 +618,184 @@ function showTabContextMenu(tabId, x, y) {
       }
     });
   }, 100);
+}
+
+// 设置鼠标手势
+function setupMouseGestures() {
+  const log = window.tauriTabs.log;
+  
+  // 手势状态 - 追踪最近的鼠标移动
+  const gestureState = {
+    recentMoves: [],     // 存储最近的鼠标位置
+    maxMoves: 50,        // 增加记录点数
+    recentWindow: 250,   // 只看最近250ms内的移动（缩短时间窗口）
+    contextMenuPos: null,
+    indicator: null
+  };
+  
+  const GESTURE_THRESHOLD = 50;      // 触发手势的最小滑动距离（像素），提高到80
+  const MIN_VELOCITY = 0.3;          // 最小速度（像素/毫秒），确保是连续滑动
+  
+  log('🎯 设置鼠标手势监听（基于 contextmenu 事件）');
+  
+  // 创建手势指示器
+  function createGestureIndicator() {
+    if (gestureState.indicator) return gestureState.indicator;
+    
+    const indicator = document.createElement('div');
+    indicator.className = 'tauri-gesture-indicator';
+    indicator.style.opacity = '0';
+    indicator.style.display = 'none';
+    document.body.appendChild(indicator);
+    gestureState.indicator = indicator;
+    return indicator;
+  }
+  
+  // 显示手势指示器
+  function showGestureIndicator(direction, x, y) {
+    const indicator = createGestureIndicator();
+    indicator.textContent = direction === 'left' ? '⬅️' : '➡️';
+    indicator.style.left = `${x + 20}px`;
+    indicator.style.top = `${y - 20}px`;
+    indicator.style.display = 'block';
+    indicator.style.opacity = '1';
+  }
+  
+  // 隐藏手势指示器
+  function hideGestureIndicator() {
+    if (gestureState.indicator) {
+      gestureState.indicator.style.opacity = '0';
+      setTimeout(() => {
+        if (gestureState.indicator) {
+          gestureState.indicator.style.display = 'none';
+        }
+      }, 200);
+    }
+  }
+  
+  // 更新指示器位置
+  function updateGestureIndicator(x, y) {
+    if (gestureState.indicator && gestureState.indicator.style.display !== 'none') {
+      gestureState.indicator.style.left = `${x + 20}px`;
+      gestureState.indicator.style.top = `${y - 20}px`;
+    }
+  }
+  
+  // 不在主文档监听 mousemove，只在 iframe 内部监听
+  
+  // 分析手势：检查最近的鼠标移动轨迹
+  function analyzeGesture(contextX, contextY) {
+    const now = Date.now();
+    
+    // 只看最近很短时间内的移动（contextmenu 触发前的移动）
+    const recentMoves = gestureState.recentMoves.filter(m => now - m.time < gestureState.recentWindow);
+    
+    if (recentMoves.length < 3) {
+      log(`📊 手势分析: 记录点太少 (${recentMoves.length}), 不是手势`);
+      return null; // 没有足够的移动数据
+    }
+    
+    // 获取最早和最近的位置
+    const firstMove = recentMoves[0];
+    const lastMove = recentMoves[recentMoves.length - 1];
+    
+    const deltaX = lastMove.x - firstMove.x;
+    const deltaY = lastMove.y - firstMove.y;
+    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+    const timeDelta = lastMove.time - firstMove.time;
+    
+    // 计算平均速度
+    const velocity = timeDelta > 0 ? distance / timeDelta : 0;
+    
+    log(`📊 手势分析: 移动=${distance.toFixed(1)}px, deltaX=${deltaX.toFixed(1)}px, 时间=${timeDelta}ms, 速度=${velocity.toFixed(2)}px/ms, 点数=${recentMoves.length}`);
+    
+    // 检查是否为有效手势：
+    // 1. 距离足够长
+    // 2. 主要是水平方向
+    // 3. 速度足够快（确保是连续滑动）
+    if (distance > GESTURE_THRESHOLD && 
+        Math.abs(deltaX) > Math.abs(deltaY) * 1.5 && 
+        velocity > MIN_VELOCITY) {
+      // 水平手势
+      const direction = deltaX > 0 ? 'right' : 'left';
+      log(`✅ 识别到${direction === 'right' ? '右' : '左'}滑手势`);
+      return direction;
+    }
+    
+    log(`❌ 不是有效手势: distance=${distance.toFixed(1)}<${GESTURE_THRESHOLD} or velocity=${velocity.toFixed(2)}<${MIN_VELOCITY}`);
+    return null;
+  }
+  
+  
+  // 右键菜单事件 - 核心手势检测逻辑（仅用于 iframe 内部）
+  function handleContextMenu(e) {
+    log(`📋 iframe contextmenu 事件触发，位置: (${e.clientX}, ${e.clientY})`);
+    
+    // 分析手势
+    const gestureDirection = analyzeGesture(e.clientX, e.clientY);
+    
+    if (gestureDirection) {
+      // 检测到手势，阻止右键菜单并执行手势动作
+      e.preventDefault();
+      e.stopPropagation();
+      log('🚫 阻止右键菜单显示（检测到手势滑动）');
+      
+      // 交换方向：右滑=上一个（左边），左滑=下一个（右边）
+      // 这样更符合触摸板/手机的滑动习惯
+      if (gestureDirection === 'right') {
+        log('✅ 触发右滑手势，切换到上一个标签（左边）');
+        switchToPrevTab();
+      } else if (gestureDirection === 'left') {
+        log('✅ 触发左滑手势，切换到下一个标签（右边）');
+        switchToNextTab();
+      }
+      
+      // 清空移动记录
+      gestureState.recentMoves = [];
+      return;
+    }
+    
+    // 没有手势，显示默认的右键菜单
+    log('📋 无手势，显示默认右键菜单');
+    
+    // 清空移动记录
+    gestureState.recentMoves = [];
+  }
+  
+  // 不在主文档监听 contextmenu，只在 iframe 内部监听
+  
+  // 暴露到全局，让 iframe 也能使用
+  window.tauriTabs.setupGestureInIframe = (iframeDoc) => {
+    if (!iframeDoc) return;
+    
+    try {
+      // 在 iframe 内部追踪鼠标移动
+      iframeDoc.addEventListener('mousemove', (e) => {
+        const now = Date.now();
+        gestureState.recentMoves.push({
+          x: e.clientX,
+          y: e.clientY,
+          time: now
+        });
+        
+        // 保留数量限制
+        if (gestureState.recentMoves.length > gestureState.maxMoves) {
+          gestureState.recentMoves.shift();
+        }
+        
+        // 清理过期记录（保留1秒内的，但判断时只用最近250ms的）
+        gestureState.recentMoves = gestureState.recentMoves.filter(m => now - m.time < 1000);
+      }, { passive: true });
+      
+      // 在 iframe 内部监听 contextmenu
+      iframeDoc.addEventListener('contextmenu', handleContextMenu, { capture: true, passive: false });
+      
+      log('✅ iframe 手势监听器已安装');
+    } catch (err) {
+      log(`⚠️ 无法在 iframe 内安装手势监听器: ${err.message}`);
+    }
+  };
+  
+  log('✅ 鼠标手势已启用（基于轨迹分析）');
 }
 

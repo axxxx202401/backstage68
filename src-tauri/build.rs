@@ -8,4 +8,3 @@ fn main() {
     println!("cargo:rerun-if-env-changed=TAURI_ENABLE_LOGS");
     tauri_build::build()
 }
-
