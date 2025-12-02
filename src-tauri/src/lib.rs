@@ -78,25 +78,13 @@ fn get_env_info() -> Result<String, String> {
     Ok(format!("当前环境: {} ({})", env_name(), env_key()))
 }
 
-/// 设置页面缩放（使用 CSS zoom 属性，类似浏览器原生缩放）
+/// 设置页面缩放（使用 Tauri 2.0 WebView 原生缩放）
 #[tauri::command]
-async fn set_zoom(window: tauri::Window, zoom_level: f64) -> Result<(), String> {
-    let script = format!(
-        r#"
-        (function() {{
-            // 使用 CSS zoom 属性，这样可以真正缩放页面，而不仅仅是视觉变化
-            document.body.style.zoom = '{}';
-        }})();
-        "#,
-        zoom_level
-    );
-
-    // 获取窗口的主 webview 并执行脚本
-    if let Some(webview) = window.webviews().first() {
-        webview.eval(&script).map_err(|e| e.to_string())
-    } else {
-        Err("No webview found".to_string())
-    }
+async fn set_zoom(window: tauri::WebviewWindow, zoom_level: f64) -> Result<(), String> {
+    // 使用 Tauri 2.0 的 WebView 原生缩放 API
+    // 这会像浏览器原生缩放一样工作，不会有 fixed 元素定位问题
+    window.set_zoom(zoom_level)
+        .map_err(|e| format!("Failed to set zoom: {}", e))
 }
 
 /// 获取当前缩放级别（从前端存储）

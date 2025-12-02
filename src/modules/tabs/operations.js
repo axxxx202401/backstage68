@@ -29,10 +29,29 @@ export function createTabElement(id, title, callbacks) {
     tab.appendChild(closeBtn);
   }
   
-  tab.addEventListener('click', () => onSwitch(id));
+  // 改为 mousedown 事件，点击立即切换（不等松手）
+  tab.addEventListener('mousedown', (e) => {
+    // 只响应左键，且不在拖拽状态
+    if (e.button === 0) {
+      // 短暂延迟，如果开始拖拽就不切换
+      setTimeout(() => {
+        if (!window.__sortableDragging) {
+          onSwitch(id);
+        }
+      }, 10);
+    }
+  });
   
-  // 不在这里绑定 contextmenu，改为在全局手势系统中处理
-  // 只需要标记 tab 的 id，让全局处理器知道点击的是哪个标签
+  // 绑定右键菜单
+  tab.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (onContextMenu) {
+      onContextMenu(id, e.clientX, e.clientY);
+    }
+  });
+  
+  // 标记 tab 的 id
   tab.dataset.tabId = id;
   
   // 不再需要 HTML5 drag 事件监听器，改用鼠标事件

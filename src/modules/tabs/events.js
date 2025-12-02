@@ -4,6 +4,7 @@
 
 import { createTab, closeTab, activateTab, refreshTab, duplicateTab, openTabInNewWindow, closeTabsToLeft, closeTabsToRight, closeOtherTabs, reorderTabs, getTabCurrentUrl, switchToNextTab, switchToPrevTab } from './operations.js';
 import { setupSimpleDrag } from './drag-simple.js';
+import { isMac } from '../utils/dom.js';
 
 // 初始化事件监听
 export function initTabEvents() {
@@ -740,14 +741,27 @@ function setupMouseGestures() {
       e.stopPropagation();
       log('🚫 阻止右键菜单显示（检测到手势滑动）');
       
-      // 交换方向：右滑=上一个（左边），左滑=下一个（右边）
-      // 这样更符合触摸板/手机的滑动习惯
+      // 根据操作系统调整手势方向
+      // Mac: 右滑=上一个，左滑=下一个（符合自然滚动习惯）
+      // Windows: 右滑=下一个，左滑=上一个（符合传统鼠标习惯）
+      const isMacSystem = isMac();
+      
       if (gestureDirection === 'right') {
-        log('✅ 触发右滑手势，切换到上一个标签（左边）');
-        switchToPrevTab();
+        if (isMacSystem) {
+          log('✅ 触发右滑手势（Mac），切换到上一个标签（左边）');
+          switchToPrevTab();
+        } else {
+          log('✅ 触发右滑手势（Windows），切换到下一个标签（右边）');
+          switchToNextTab();
+        }
       } else if (gestureDirection === 'left') {
-        log('✅ 触发左滑手势，切换到下一个标签（右边）');
-        switchToNextTab();
+        if (isMacSystem) {
+          log('✅ 触发左滑手势（Mac），切换到下一个标签（右边）');
+          switchToNextTab();
+        } else {
+          log('✅ 触发左滑手势（Windows），切换到上一个标签（左边）');
+          switchToPrevTab();
+        }
       }
       
       // 清空移动记录
