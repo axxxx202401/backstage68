@@ -287,13 +287,6 @@ function setupTitleObserver(iframe, id, tabData, log) {
         }
       }, 1000);
       tabData.titleCheckInterval = titleCheckInterval;
-      
-      // 应用当前缩放
-      const zoomLevel = window.tauriTabs.currentZoom || 1.0;
-      if (zoomLevel !== 1.0 && iframeDoc.body) {
-        iframeDoc.body.style.zoom = zoomLevel;
-        log(`🔍 应用缩放 ${Math.round(zoomLevel * 100)}% 到新标签`);
-      }
     } catch (e) {
       updateTabTitle(id, tabData.url);
       log(`⚠️  无法访问 iframe 内容 (可能跨域)`);
@@ -326,22 +319,6 @@ export function activateTab(id) {
   // 更新窗口标题
   if (tab.title) {
     updateMainWindowTitle(tab.title);
-  }
-  
-  // 应用缩放
-  const zoomLevel = window.tauriTabs.currentZoom || 1.0;
-  if (zoomLevel !== 1.0) {
-    setTimeout(() => {
-      try {
-        const iframeDoc = tab.iframe.contentDocument || tab.iframe.contentWindow.document;
-        if (iframeDoc && iframeDoc.body) {
-          iframeDoc.body.style.zoom = zoomLevel;
-          log(`🔍 切换标签后应用缩放: ${Math.round(zoomLevel * 100)}%`);
-        }
-      } catch (e) {
-        log(`⚠️  无法应用缩放到 iframe: ${e.message}`);
-      }
-    }, 100);
   }
 }
 
