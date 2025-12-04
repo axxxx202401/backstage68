@@ -187,7 +187,8 @@ jobs:
           releaseBody: ${{ github.ref_type == 'tag' && '🚀 Release build' || '' }}
           releaseDraft: true
           prerelease: ${{ steps.env.outputs.environment != 'prod' }}
-          args: --target ${{ matrix.platform.target }}
+          # test/uat 环境启用 devtools feature，prod 环境不启用
+          args: --target ${{ matrix.platform.target }} ${{ steps.env.outputs.environment != 'prod' && '--features devtools' || '' }}
 
       - name: Restore tauri.conf.json
         if: always()
