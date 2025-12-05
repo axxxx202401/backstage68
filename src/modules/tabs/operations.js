@@ -249,6 +249,16 @@ export function createTab(url) {
 // 设置标题观察器
 function setupTitleObserver(iframe, id, tabData, log) {
   iframe.addEventListener('load', () => {
+    // 先清理旧的观察器和定时器，避免多个同时运行导致标题闪烁
+    if (tabData.titleObserver) {
+      tabData.titleObserver.disconnect();
+      tabData.titleObserver = null;
+    }
+    if (tabData.titleCheckInterval) {
+      clearInterval(tabData.titleCheckInterval);
+      tabData.titleCheckInterval = null;
+    }
+    
     try {
       const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
       const newTitle = iframeDoc.title || tabData.url;
@@ -262,7 +272,6 @@ function setupTitleObserver(iframe, id, tabData, log) {
         const observer = new MutationObserver(() => {
           const updatedTitle = iframeDoc.title;
           if (updatedTitle && updatedTitle !== tabData.title) {
-            log(`📝 检测到标题变化: ${updatedTitle}`);
             updateTabTitle(id, updatedTitle);
           }
         });
@@ -274,19 +283,7 @@ function setupTitleObserver(iframe, id, tabData, log) {
         tabData.titleObserver = observer;
       }
       
-      // 定期检查标题（兜底）
-      const titleCheckInterval = setInterval(() => {
-        try {
-          const currentTitle = iframeDoc.title;
-          if (currentTitle && currentTitle !== tabData.title) {
-            log(`🔄 定期检查发现标题变化: ${currentTitle}`);
-            updateTabTitle(id, currentTitle);
-          }
-        } catch (err) {
-          clearInterval(titleCheckInterval);
-        }
-      }, 1000);
-      tabData.titleCheckInterval = titleCheckInterval;
+      // 移除定期检查（MutationObserver 已经足够，减少不必要的更新）
     } catch (e) {
       updateTabTitle(id, tabData.url);
       log(`⚠️  无法访问 iframe 内容 (可能跨域)`);
