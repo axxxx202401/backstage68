@@ -302,6 +302,49 @@ pub fn run() {
             set_window_title,
             create_new_window
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // macOS: 处理 Reopen 事件
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { has_visible_windows, .. } = event {
+                if !has_visible_windows {
+                    // 没有可见窗口时（双击应用图标启动）→ 创建新窗口
+                    log!("🪟 No visible windows, creating new window...");
+                    let _ = create_reopen_window(app);
+                }
+                // 有可见窗口时（点击 Dock）→ 不做任何事，让系统显示已有窗口
+            }
+        });
+}
+
+/// 创建 Reopen 窗口（用于 macOS 双击图标时）
+fn create_reopen_window(app: &tauri::AppHandle) -> Result<(), String> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    
+    static REOPEN_COUNTER: AtomicUsize = AtomicUsize::new(1);
+    let window_id = REOPEN_COUNTER.fetch_add(1, Ordering::SeqCst);
+    let window_label = format!("reopen-{}", window_id);
+    
+    let target_url = env_url();
+    let inject_script = include_str!("../../src/inject.js");
+    let final_script = format!(
+        "window.__TAURI_ENABLE_LOGS__ = {};\n{}",
+        ENABLE_LOGS, inject_script
+    );
+    
+    WebviewWindowBuilder::new(
+        app,
+        &window_label,
+        WebviewUrl::External(target_url.parse().map_err(|e| format!("Invalid URL: {}", e))?),
+    )
+    .title(format!("Backstage68 - {}", env_name()))
+    .inner_size(1200.0, 800.0)
+    .resizable(true)
+    .initialization_script(&final_script)
+    .build()
+    .map_err(|e| format!("Failed to create window: {}", e))?;
+    
+    log!("✓ New window created: {}", window_label);
+    Ok(())
 }

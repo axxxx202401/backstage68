@@ -167,14 +167,14 @@ export function initProxy(log, invoke) {
         console.log('🔧 Request Method:', debug.request_method);
         console.log('📤 Request Headers:', debug.request_headers);
         if (debug.request_body) {
-          console.log('📦 Request Body:', debug.request_body.substring(0, 500));
+          console.log('📦 Request Body:', JSON.parse(debug.request_body));
         }
         console.log('📊 Response Status:', debug.response_status);
         console.log('📥 Response Headers:', debug.response_headers);
         if (response.is_binary) {
           console.log('📦 Response Type: Binary (base64 encoded)');
         } else {
-          console.log('📄 Response Body:', response.body.substring(0, 500));
+          console.log('📄 Response Body:', JSON.parse(response.body));
         }
         console.groupEnd();
       }
@@ -319,14 +319,14 @@ export function initProxy(log, invoke) {
             console.log('🔧 Request Method:', debug.request_method);
             console.log('📤 Request Headers:', debug.request_headers);
             if (debug.request_body) {
-              console.log('📦 Request Body:', debug.request_body.substring(0, 500));
+              console.log('📦 Request Body:', JSON.parse(debug.request_body));
             }
             console.log('📊 Response Status:', debug.response_status);
             console.log('📥 Response Headers:', debug.response_headers);
             if (response.is_binary) {
               console.log('📦 Response Type: Binary (base64 encoded)');
             } else {
-              console.log('📄 Response Body:', response.body.substring(0, 500));
+              console.log('📄 Response Body:', JSON.parse(response.body));
             }
             console.groupEnd();
           }
@@ -386,14 +386,14 @@ export function initProxy(log, invoke) {
           console.log('🔧 Request Method:', debug.request_method);
           console.log('📤 Request Headers:', debug.request_headers);
           if (debug.request_body) {
-            console.log('📦 Request Body:', debug.request_body.substring(0, 500));
+            console.log('📦 Request Body:', JSON.parse(debug.request_body));
           }
           console.log('📊 Response Status:', debug.response_status);
           console.log('📥 Response Headers:', debug.response_headers);
           if (response.is_binary) {
             console.log('📦 Response Type: Binary (base64 encoded)');
           } else {
-            console.log('📄 Response Body:', response.body.substring(0, 500));
+            console.log('📄 Response Body:', JSON.parse(response.body));
           }
           console.groupEnd();
         }
