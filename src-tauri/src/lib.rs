@@ -72,6 +72,18 @@ const DEVTOOLS_ENABLED: bool = {
     }
 };
 
+// 编译时判断是否自动打开开发者工具（默认 false）
+#[cfg(debug_assertions)]
+const DEVTOOLS_AUTO_OPEN: bool = true;
+
+#[cfg(not(debug_assertions))]
+const DEVTOOLS_AUTO_OPEN: bool = {
+    match option_env!("TAURI_DEVTOOLS_AUTO_OPEN") {
+        Some(val) => matches!(val.as_bytes(), b"true"),
+        None => false,
+    }
+};
+
 /// 获取当前环境信息
 #[tauri::command]
 fn get_env_info() -> Result<String, String> {
@@ -274,8 +286,8 @@ pub fn run() {
 
             log!("✓ Window created");
 
-            // 在 devtools 启用时自动打开
-            if DEVTOOLS_ENABLED {
+            // 在 devtools 启用且设置为自动打开时才打开
+            if DEVTOOLS_ENABLED && DEVTOOLS_AUTO_OPEN {
                 #[cfg(feature = "devtools")]
                 {
                     let w2 = window.clone();

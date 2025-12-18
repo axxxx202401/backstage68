@@ -82,7 +82,7 @@ export $(cat $ENV_FILE | grep -v '^#' | xargs)
 
 echo "   环境名称: $TAURI_ENV_NAME"
 echo "   访问地址: $TAURI_ENV_URL"
-echo "   开发工具: $TAURI_DEVTOOLS_ENABLED"
+echo "   开发工具: $TAURI_DEVTOOLS_ENABLED (自动打开: $TAURI_DEVTOOLS_AUTO_OPEN)"
 echo ""
 
 # 构建 inject.js（重要：确保使用最新的模块化代码）
