@@ -43,10 +43,10 @@ jobs:
             target: x86_64-pc-windows-msvc
             name: Windows (x64)
           # Linux 打包已禁用（如需要可取消注释）
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             name: Linux (x64)
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             target: aarch64-unknown-linux-gnu
             name: Linux (ARM64)
 
@@ -76,27 +76,27 @@ jobs:
           echo "✅ create-dmg installed"
 
       - name: Install dependencies (Ubuntu)
-        if: matrix.platform.os == 'ubuntu-22.04'
+        if: startsWith(matrix.platform.os, 'ubuntu')
         run: |
           if [[ "${{ matrix.platform.target }}" == "aarch64-unknown-linux-gnu" ]]; then
             # ARM64 交叉编译依赖
-            # 先限制 security.ubuntu.com 只用于 amd64 架构，避免 404 错误
-            # 备份原始 sources.list
-            sudo cp /etc/apt/sources.list /etc/apt/sources.list.bak
-            # 修改 sources.list，给所有 security.ubuntu.com 的行添加 [arch=amd64] 限制
-            sudo sed -i '/security\.ubuntu\.com/s/^deb /deb [arch=amd64] /' /etc/apt/sources.list
+            # 注释掉所有包含 security.ubuntu.com 的源（该源不支持 arm64）
+            sudo sed -i 's|^deb.*security\.ubuntu\.com|# &|g' /etc/apt/sources.list
+            sudo sed -i 's|^deb-src.*security\.ubuntu\.com|# &|g' /etc/apt/sources.list
             # 同样处理 sources.list.d 中的文件
             for file in /etc/apt/sources.list.d/*.list; do
               if [ -f "$file" ]; then
-                sudo sed -i '/security\.ubuntu\.com/s/^deb /deb [arch=amd64] /' "$file"
+                sudo sed -i 's|^deb.*security\.ubuntu\.com|# &|g' "$file"
+                sudo sed -i 's|^deb-src.*security\.ubuntu\.com|# &|g' "$file"
               fi
             done
             # 添加 arm64 架构并配置软件源（只从 ports 仓库获取 arm64 包）
             sudo dpkg --add-architecture arm64
             # 创建临时 sources.list.d 配置，只从 ports 仓库获取 arm64 包
-            echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/arm64.list
-            echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64.list
-            echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy-security main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64.list
+            # 使用 noble (Ubuntu 24.04) 代号
+            echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ noble main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/arm64.list
+            echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ noble-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64.list
+            echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ noble-security main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64.list
             sudo apt-get update
             sudo apt-get install -y \
               gcc-aarch64-linux-gnu \
