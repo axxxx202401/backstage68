@@ -80,9 +80,20 @@ jobs:
         run: |
           if [[ "${{ matrix.platform.target }}" == "aarch64-unknown-linux-gnu" ]]; then
             # ARM64 交叉编译依赖
-            # 添加 arm64 架构并配置软件源（只从主仓库获取 arm64 包）
+            # 先限制 security.ubuntu.com 只用于 amd64 架构，避免 404 错误
+            # 备份原始 sources.list
+            sudo cp /etc/apt/sources.list /etc/apt/sources.list.bak
+            # 修改 sources.list，给所有 security.ubuntu.com 的行添加 [arch=amd64] 限制
+            sudo sed -i '/security\.ubuntu\.com/s/^deb /deb [arch=amd64] /' /etc/apt/sources.list
+            # 同样处理 sources.list.d 中的文件
+            for file in /etc/apt/sources.list.d/*.list; do
+              if [ -f "$file" ]; then
+                sudo sed -i '/security\.ubuntu\.com/s/^deb /deb [arch=amd64] /' "$file"
+              fi
+            done
+            # 添加 arm64 架构并配置软件源（只从 ports 仓库获取 arm64 包）
             sudo dpkg --add-architecture arm64
-            # 创建临时 sources.list.d 配置，只从主仓库获取 arm64 包
+            # 创建临时 sources.list.d 配置，只从 ports 仓库获取 arm64 包
             echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/arm64.list
             echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64.list
             echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ jammy-security main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64.list
