@@ -180,7 +180,8 @@ if ($envMap.ContainsKey("TAURI_ENV_KEY")) {
     Write-Host ("   Key       : {0}" -f $envMap["TAURI_ENV_KEY"])
 }
 if ($envMap.ContainsKey("TAURI_DEVTOOLS_ENABLED")) {
-    Write-Host ("   DevTools  : {0}" -f $envMap["TAURI_DEVTOOLS_ENABLED"])
+    $autoOpen = if ($envMap.ContainsKey("TAURI_DEVTOOLS_AUTO_OPEN")) { $envMap["TAURI_DEVTOOLS_AUTO_OPEN"] } else { "false" }
+    Write-Host ("   DevTools  : {0} (AutoOpen: {1})" -f $envMap["TAURI_DEVTOOLS_ENABLED"], $autoOpen)
 }
 Write-Host ""
 

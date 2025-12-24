@@ -46,6 +46,9 @@ jobs:
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             name: Linux (x64)
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+            name: Linux (ARM64)
 
     runs-on: ${{ matrix.platform.os }}
     name: Build ${{ matrix.platform.name }}
@@ -76,12 +79,32 @@ jobs:
         if: matrix.platform.os == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            libssl-dev
+          if [[ "${{ matrix.platform.target }}" == "aarch64-unknown-linux-gnu" ]]; then
+            # ARM64 交叉编译依赖
+            sudo dpkg --add-architecture arm64
+            sudo apt-get update
+            sudo apt-get install -y \
+              gcc-aarch64-linux-gnu \
+              g++-aarch64-linux-gnu \
+              libwebkit2gtk-4.1-dev:arm64 \
+              libappindicator3-dev:arm64 \
+              librsvg2-dev:arm64 \
+              libssl-dev:arm64 \
+              patchelf
+            # 设置交叉编译环境变量
+            echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+            echo "CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++" >> $GITHUB_ENV
+            echo "AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar" >> $GITHUB_ENV
+            echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          else
+            # x86_64 依赖
+            sudo apt-get install -y \
+              libwebkit2gtk-4.1-dev \
+              libappindicator3-dev \
+              librsvg2-dev \
+              patchelf \
+              libssl-dev
+          fi
 
       - name: Install frontend dependencies
         run: npm ci
@@ -122,6 +145,7 @@ jobs:
             echo "TAURI_ENV_KEY=test" >> $GITHUB_ENV
             echo "TAURI_ENV_URL=https://test-otc.68chat.co/" >> $GITHUB_ENV
             echo "TAURI_DEVTOOLS_ENABLED=true" >> $GITHUB_ENV
+            echo "TAURI_DEVTOOLS_AUTO_OPEN=false" >> $GITHUB_ENV
             echo "TAURI_ENABLE_LOGS=true" >> $GITHUB_ENV
             echo "TAURI_PRODUCT_NAME=Backstage68-Test" >> $GITHUB_ENV
             echo "TAURI_BUNDLE_IDENTIFIER=com.backstage68.test" >> $GITHUB_ENV
@@ -130,6 +154,7 @@ jobs:
             echo "TAURI_ENV_KEY=uat" >> $GITHUB_ENV
             echo "TAURI_ENV_URL=https://stage-otc.68chat.co/" >> $GITHUB_ENV
             echo "TAURI_DEVTOOLS_ENABLED=true" >> $GITHUB_ENV
+            echo "TAURI_DEVTOOLS_AUTO_OPEN=false" >> $GITHUB_ENV
             echo "TAURI_ENABLE_LOGS=false" >> $GITHUB_ENV
             echo "TAURI_PRODUCT_NAME=Backstage68-UAT" >> $GITHUB_ENV
             echo "TAURI_BUNDLE_IDENTIFIER=com.backstage68.uat" >> $GITHUB_ENV
@@ -138,6 +163,7 @@ jobs:
             echo "TAURI_ENV_KEY=prod" >> $GITHUB_ENV
             echo "TAURI_ENV_URL=https://b12e88-gg-ooxx.8cmanage.com/" >> $GITHUB_ENV
             echo "TAURI_DEVTOOLS_ENABLED=false" >> $GITHUB_ENV
+            echo "TAURI_DEVTOOLS_AUTO_OPEN=false" >> $GITHUB_ENV
             echo "TAURI_ENABLE_LOGS=false" >> $GITHUB_ENV
             echo "TAURI_PRODUCT_NAME=Backstage68" >> $GITHUB_ENV
             echo "TAURI_BUNDLE_IDENTIFIER=com.backstage68.app" >> $GITHUB_ENV
