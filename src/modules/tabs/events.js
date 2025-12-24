@@ -4,7 +4,7 @@
 
 import { createTab, closeTab, activateTab, refreshTab, duplicateTab, openTabInNewWindow, closeTabsToLeft, closeTabsToRight, closeOtherTabs, reorderTabs, getTabCurrentUrl, switchToNextTab, switchToPrevTab } from './operations.js';
 import { setupSimpleDrag } from './drag-simple.js';
-import { isMac } from '../utils/dom.js';
+import { isMac, isLinux } from '../utils/dom.js';
 
 // 初始化事件监听
 export function initTabEvents() {
@@ -21,6 +21,10 @@ export function initTabEvents() {
   // 设置鼠标手势
   setupMouseGestures();
   console.log('✅ setupMouseGestures 完成');
+  
+  // 设置水平滚轮切换标签（所有平台）
+  setupHorizontalWheelNavigation();
+  console.log('✅ setupHorizontalWheelNavigation 完成');
   
   window.tauriTabs.showContextMenu = showTabContextMenu;
   console.log('✅ showContextMenu 设置完成');
@@ -67,8 +71,16 @@ function setupKeyboardShortcuts() {
   if (window.self !== window.top) return;
   
   document.addEventListener('keydown', (e) => {
-    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-    const isCtrlOrCmd = isMac ? e.metaKey : e.ctrlKey;
+    const isMacOS = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const isCtrlOrCmd = isMacOS ? e.metaKey : e.ctrlKey;
+    
+    // Ctrl+F / Cmd+F: 页面内搜索（在当前 iframe 中触发浏览器搜索）
+    if (isCtrlOrCmd && e.key === 'f') {
+      e.preventDefault();
+      e.stopPropagation();
+      showPageSearch();
+      return;
+    }
     
     if (!isCtrlOrCmd) return;
     if (!window.tauriTabs || !window.tauriTabs.tabs) return;
@@ -811,5 +823,408 @@ function setupMouseGestures() {
   };
   
   log('✅ 鼠标手势已启用（基于轨迹分析）');
+}
+
+// 设置水平滚轮切换标签（修复问题2）
+function setupHorizontalWheelNavigation() {
+  const log = window.tauriTabs.log;
+  
+  // 在标签栏区域监听水平滚轮
+  const tabBar = document.getElementById('tauri-tab-bar');
+  if (!tabBar) {
+    log('⚠️ 标签栏未找到，延迟设置水平滚轮');
+    setTimeout(setupHorizontalWheelNavigation, 100);
+    return;
+  }
+  
+  // 防抖变量
+  let lastWheelTime = 0;
+  const WHEEL_DEBOUNCE = 150; // 150ms 防抖
+  
+  tabBar.addEventListener('wheel', (e) => {
+    // 检查是否为水平滚动（触控板双指左右滑动会产生 deltaX）
+    const isHorizontalScroll = Math.abs(e.deltaX) > Math.abs(e.deltaY);
+    
+    if (!isHorizontalScroll) return;
+    if (Math.abs(e.deltaX) < 10) return; // 忽略微小滑动
+    
+    const now = Date.now();
+    if (now - lastWheelTime < WHEEL_DEBOUNCE) return;
+    lastWheelTime = now;
+    
+    e.preventDefault();
+    
+    // 根据滑动方向切换标签
+    // 右滑（deltaX > 0）= 下一个标签，左滑（deltaX < 0）= 上一个标签
+    if (e.deltaX > 0) {
+      log('➡️ 水平滚轮向右，切换到下一个标签');
+      switchToNextTab();
+    } else {
+      log('⬅️ 水平滚轮向左，切换到上一个标签');
+      switchToPrevTab();
+    }
+  }, { passive: false });
+  
+  log('✅ 水平滚轮标签切换已启用');
+}
+
+// 页面内搜索功能（修复问题6: Ctrl+F）
+let pageSearchOverlay = null;
+
+function showPageSearch() {
+  const log = window.tauriTabs.log;
+  log('🔍 打开页面搜索');
+  
+  // 如果已经存在搜索框，则聚焦
+  if (pageSearchOverlay) {
+    const input = pageSearchOverlay.querySelector('.tauri-page-search-input');
+    if (input) {
+      input.focus();
+      input.select();
+    }
+    return;
+  }
+  
+  // 添加搜索样式
+  addPageSearchStyles();
+  
+  // 创建搜索栏（固定在顶部）
+  pageSearchOverlay = document.createElement('div');
+  pageSearchOverlay.className = 'tauri-page-search-bar';
+  
+  pageSearchOverlay.innerHTML = `
+    <div class="tauri-page-search-container">
+      <input type="text" class="tauri-page-search-input" placeholder="在页面中查找..." autofocus>
+      <span class="tauri-page-search-count">0/0</span>
+      <button class="tauri-page-search-btn tauri-page-search-prev" title="上一个 (Shift+Enter)">▲</button>
+      <button class="tauri-page-search-btn tauri-page-search-next" title="下一个 (Enter)">▼</button>
+      <button class="tauri-page-search-btn tauri-page-search-close" title="关闭 (Esc)">✕</button>
+    </div>
+  `;
+  
+  document.body.appendChild(pageSearchOverlay);
+  
+  const input = pageSearchOverlay.querySelector('.tauri-page-search-input');
+  const countDisplay = pageSearchOverlay.querySelector('.tauri-page-search-count');
+  const prevBtn = pageSearchOverlay.querySelector('.tauri-page-search-prev');
+  const nextBtn = pageSearchOverlay.querySelector('.tauri-page-search-next');
+  const closeBtn = pageSearchOverlay.querySelector('.tauri-page-search-close');
+  
+  // 搜索状态
+  let matches = [];
+  let currentMatchIndex = -1;
+  
+  // 获取当前活动的 iframe
+  function getActiveIframe() {
+    const activeTab = window.tauriTabs.tabs.find(t => t.id === window.tauriTabs.activeTabId);
+    return activeTab ? activeTab.iframe : null;
+  }
+  
+  // 在 iframe 中搜索
+  function searchInIframe(query) {
+    matches = [];
+    currentMatchIndex = -1;
+    clearHighlights();
+    
+    if (!query.trim()) {
+      updateCount();
+      return;
+    }
+    
+    const iframe = getActiveIframe();
+    if (!iframe) return;
+    
+    try {
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+      const walker = document.createTreeWalker(
+        iframeDoc.body,
+        NodeFilter.SHOW_TEXT,
+        null,
+        false
+      );
+      
+      const queryLower = query.toLowerCase();
+      let node;
+      
+      while (node = walker.nextNode()) {
+        const text = node.textContent;
+        const textLower = text.toLowerCase();
+        let index = 0;
+        
+        while ((index = textLower.indexOf(queryLower, index)) !== -1) {
+          matches.push({
+            node,
+            index,
+            length: query.length
+          });
+          index += query.length;
+        }
+      }
+      
+      log(`🔍 找到 ${matches.length} 个匹配`);
+      
+      if (matches.length > 0) {
+        currentMatchIndex = 0;
+        highlightMatches(iframeDoc, query);
+        scrollToMatch(0);
+      }
+      
+      updateCount();
+    } catch (err) {
+      log(`⚠️ 搜索失败: ${err.message}`);
+    }
+  }
+  
+  // 高亮匹配项
+  function highlightMatches(iframeDoc, query) {
+    // 清除旧的高亮
+    clearHighlights();
+    
+    // 使用 CSS 高亮 API 或手动创建高亮元素
+    matches.forEach((match, index) => {
+      try {
+        const range = iframeDoc.createRange();
+        range.setStart(match.node, match.index);
+        range.setEnd(match.node, match.index + match.length);
+        
+        const highlight = iframeDoc.createElement('span');
+        highlight.className = 'tauri-search-highlight';
+        highlight.dataset.matchIndex = index;
+        
+        if (index === currentMatchIndex) {
+          highlight.classList.add('current');
+        }
+        
+        range.surroundContents(highlight);
+        match.element = highlight;
+      } catch (err) {
+        // 忽略无法高亮的情况（如跨节点选择）
+      }
+    });
+  }
+  
+  // 清除高亮
+  function clearHighlights() {
+    const iframe = getActiveIframe();
+    if (!iframe) return;
+    
+    try {
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+      const highlights = iframeDoc.querySelectorAll('.tauri-search-highlight');
+      highlights.forEach(el => {
+        const parent = el.parentNode;
+        parent.replaceChild(document.createTextNode(el.textContent), el);
+        parent.normalize();
+      });
+    } catch (err) {
+      // 忽略错误
+    }
+  }
+  
+  // 滚动到匹配项
+  function scrollToMatch(index) {
+    if (index < 0 || index >= matches.length) return;
+    
+    const iframe = getActiveIframe();
+    if (!iframe) return;
+    
+    try {
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+      
+      // 更新当前高亮
+      iframeDoc.querySelectorAll('.tauri-search-highlight').forEach((el, i) => {
+        el.classList.toggle('current', i === index);
+      });
+      
+      // 滚动到视图
+      const currentHighlight = iframeDoc.querySelector('.tauri-search-highlight.current');
+      if (currentHighlight) {
+        currentHighlight.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    } catch (err) {
+      // 忽略错误
+    }
+  }
+  
+  // 更新计数显示
+  function updateCount() {
+    if (matches.length === 0) {
+      countDisplay.textContent = '0/0';
+      countDisplay.style.color = '#999';
+    } else {
+      countDisplay.textContent = `${currentMatchIndex + 1}/${matches.length}`;
+      countDisplay.style.color = '#fff';
+    }
+  }
+  
+  // 下一个匹配
+  function nextMatch() {
+    if (matches.length === 0) return;
+    currentMatchIndex = (currentMatchIndex + 1) % matches.length;
+    scrollToMatch(currentMatchIndex);
+    updateCount();
+  }
+  
+  // 上一个匹配
+  function prevMatch() {
+    if (matches.length === 0) return;
+    currentMatchIndex = (currentMatchIndex - 1 + matches.length) % matches.length;
+    scrollToMatch(currentMatchIndex);
+    updateCount();
+  }
+  
+  // 关闭搜索
+  function closeSearch() {
+    clearHighlights();
+    if (pageSearchOverlay) {
+      pageSearchOverlay.remove();
+      pageSearchOverlay = null;
+    }
+    log('🔍 关闭页面搜索');
+  }
+  
+  // 添加高亮样式到 iframe
+  function injectHighlightStyles() {
+    const iframe = getActiveIframe();
+    if (!iframe) return;
+    
+    try {
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+      if (iframeDoc.getElementById('tauri-search-highlight-style')) return;
+      
+      const style = iframeDoc.createElement('style');
+      style.id = 'tauri-search-highlight-style';
+      style.textContent = `
+        .tauri-search-highlight {
+          background-color: #ffff00 !important;
+          color: #000 !important;
+          padding: 1px 0;
+          border-radius: 2px;
+        }
+        .tauri-search-highlight.current {
+          background-color: #ff9632 !important;
+          box-shadow: 0 0 4px rgba(255, 150, 50, 0.8);
+        }
+      `;
+      iframeDoc.head.appendChild(style);
+    } catch (err) {
+      // 忽略跨域错误
+    }
+  }
+  
+  // 事件绑定
+  let searchTimeout;
+  input.addEventListener('input', () => {
+    injectHighlightStyles();
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+      searchInIframe(input.value);
+    }, 200);
+  });
+  
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        prevMatch();
+      } else {
+        nextMatch();
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeSearch();
+    }
+  });
+  
+  prevBtn.addEventListener('click', prevMatch);
+  nextBtn.addEventListener('click', nextMatch);
+  closeBtn.addEventListener('click', closeSearch);
+  
+  // 聚焦输入框
+  setTimeout(() => input.focus(), 50);
+}
+
+// 页面搜索样式
+let pageSearchStylesAdded = false;
+function addPageSearchStyles() {
+  if (pageSearchStylesAdded || !document.head) return;
+  pageSearchStylesAdded = true;
+  
+  const style = document.createElement('style');
+  style.textContent = `
+    .tauri-page-search-bar {
+      position: fixed;
+      top: 45px;
+      right: 10px;
+      z-index: 10000001;
+      animation: searchSlideIn 0.2s ease-out;
+    }
+    @keyframes searchSlideIn {
+      from {
+        opacity: 0;
+        transform: translateY(-10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+    .tauri-page-search-container {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(40, 40, 40, 0.95);
+      backdrop-filter: blur(10px);
+      padding: 8px 12px;
+      border-radius: 8px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .tauri-page-search-input {
+      width: 200px;
+      padding: 6px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 4px;
+      background: rgba(0, 0, 0, 0.3);
+      color: #fff;
+      font-size: 13px;
+      outline: none;
+    }
+    .tauri-page-search-input:focus {
+      border-color: #0066cc;
+      box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.3);
+    }
+    .tauri-page-search-input::placeholder {
+      color: #888;
+    }
+    .tauri-page-search-count {
+      color: #999;
+      font-size: 12px;
+      min-width: 40px;
+      text-align: center;
+    }
+    .tauri-page-search-btn {
+      width: 24px;
+      height: 24px;
+      border: none;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      color: #ccc;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      transition: background 0.15s;
+    }
+    .tauri-page-search-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+      color: #fff;
+    }
+    .tauri-page-search-close {
+      font-size: 14px;
+    }
+  `;
+  document.head.appendChild(style);
 }
 

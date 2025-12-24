@@ -3,6 +3,7 @@
  */
 
 import { TAB_CONFIG, updateTabWidths } from './ui.js';
+import { applyLinuxFixesToIframe } from '../linux-fixes.js';
 
 // 创建标签 DOM 元素
 export function createTabElement(id, title, callbacks) {
@@ -120,6 +121,9 @@ export function createIframe(url, log) {
         if (window.tauriTabs && window.tauriTabs.setupGestureInIframe) {
           window.tauriTabs.setupGestureInIframe(iframeDoc);
         }
+        
+        // 在 iframe 内应用 Linux 修复（双击选中、边框样式等）
+        applyLinuxFixesToIframe(iframeDoc, log);
       }
     } catch (err) {
       log(`⚠️  处理 iframe 事件失败: ${err.message}`);

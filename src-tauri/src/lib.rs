@@ -90,6 +90,61 @@ fn get_env_info() -> Result<String, String> {
     Ok(format!("当前环境: {} ({})", env_name(), env_key()))
 }
 
+/// 获取系统下载目录（修复 Linux 下载目录问题）
+#[tauri::command]
+fn get_download_dir() -> Result<String, String> {
+    // 使用 dirs crate 获取下载目录
+    if let Some(download_dir) = dirs::download_dir() {
+        let path = download_dir.to_string_lossy().to_string();
+        log!("📂 系统下载目录: {}", path);
+        return Ok(path);
+    }
+
+    // 备用方案：尝试获取用户主目录下的 Downloads 或 下载
+    if let Some(home_dir) = dirs::home_dir() {
+        // 优先尝试 Downloads（英文）
+        let downloads_en = home_dir.join("Downloads");
+        if downloads_en.exists() {
+            let path = downloads_en.to_string_lossy().to_string();
+            log!("📂 找到下载目录 (Downloads): {}", path);
+            return Ok(path);
+        }
+
+        // 尝试 下载（中文，Linux 中文系统）
+        let downloads_zh = home_dir.join("下载");
+        if downloads_zh.exists() {
+            let path = downloads_zh.to_string_lossy().to_string();
+            log!("📂 找到下载目录 (下载): {}", path);
+            return Ok(path);
+        }
+
+        // 最后尝试创建 Downloads 目录
+        if let Ok(()) = std::fs::create_dir_all(&downloads_en) {
+            let path = downloads_en.to_string_lossy().to_string();
+            log!("📂 已创建下载目录: {}", path);
+            return Ok(path);
+        }
+    }
+
+    Err("无法获取下载目录".to_string())
+}
+
+/// 获取操作系统类型
+#[tauri::command]
+fn get_os_type() -> String {
+    #[cfg(target_os = "linux")]
+    return "linux".to_string();
+
+    #[cfg(target_os = "macos")]
+    return "macos".to_string();
+
+    #[cfg(target_os = "windows")]
+    return "windows".to_string();
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    return "unknown".to_string();
+}
+
 /// 设置页面缩放（使用 Tauri 2.0 WebView 原生缩放）
 #[tauri::command]
 async fn set_zoom(window: tauri::WebviewWindow, zoom_level: f64) -> Result<(), String> {
@@ -312,7 +367,9 @@ pub fn run() {
             set_zoom,
             get_zoom,
             set_window_title,
-            create_new_window
+            create_new_window,
+            get_download_dir,
+            get_os_type
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

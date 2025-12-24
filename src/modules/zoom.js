@@ -2,11 +2,14 @@
  * 页面缩放模块
  */
 
-import { isMac, getModifierKey } from './utils/dom.js';
+import { isMac, isLinux, getModifierKey } from './utils/dom.js';
 
 const MIN_ZOOM = 0.25;   // 25%
 const MAX_ZOOM = 5.0;    // 500%
 const ZOOM_STEP = 0.05;  // 5%
+
+// Linux 系统的缩放防抖时间（毫秒）
+const LINUX_ZOOM_DEBOUNCE = 100;
 
 export function initZoom(log) {
   log("🔍 初始化缩放模块...");
@@ -14,6 +17,13 @@ export function initZoom(log) {
   let currentZoom = 1.0;
   let zoomIndicator = null;
   let zoomTimeout = null;
+  let zoomDebounceTimer = null;
+  let pendingZoom = null;
+  const isLinuxSystem = isLinux();
+  
+  if (isLinuxSystem) {
+    log("🐧 Linux 系统检测到，启用缩放防抖优化");
+  }
 
   function createZoomIndicator() {
     if (!zoomIndicator) {
@@ -54,7 +64,8 @@ export function initZoom(log) {
     }, 1000);
   }
 
-  async function applyZoom(zoom) {
+  // 实际执行缩放的函数
+  async function doApplyZoom(zoom) {
     try {
       currentZoom = zoom;
       if (window.tauriTabs) {
@@ -75,17 +86,45 @@ export function initZoom(log) {
     }
   }
 
+  // 带防抖的缩放函数（优化 Linux 多窗口性能）
+  async function applyZoom(zoom) {
+    // 立即更新指示器显示
+    showZoomIndicator(zoom);
+    
+    // 非 Linux 系统直接执行
+    if (!isLinuxSystem) {
+      return doApplyZoom(zoom);
+    }
+    
+    // Linux 系统使用防抖
+    pendingZoom = zoom;
+    
+    if (zoomDebounceTimer) {
+      clearTimeout(zoomDebounceTimer);
+    }
+    
+    zoomDebounceTimer = setTimeout(async () => {
+      if (pendingZoom !== null) {
+        await doApplyZoom(pendingZoom);
+        pendingZoom = null;
+      }
+    }, LINUX_ZOOM_DEBOUNCE);
+  }
+
   async function zoomIn() {
     const newZoom = Math.min(currentZoom + ZOOM_STEP, MAX_ZOOM);
+    currentZoom = newZoom; // 立即更新，避免连续操作时的延迟
     await applyZoom(newZoom);
   }
 
   async function zoomOut() {
     const newZoom = Math.max(currentZoom - ZOOM_STEP, MIN_ZOOM);
+    currentZoom = newZoom; // 立即更新，避免连续操作时的延迟
     await applyZoom(newZoom);
   }
 
   async function zoomReset() {
+    currentZoom = 1.0;
     await applyZoom(1.0);
   }
 
