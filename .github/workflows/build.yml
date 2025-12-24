@@ -81,47 +81,16 @@ jobs:
           if [[ "${{ matrix.platform.target }}" == "aarch64-unknown-linux-gnu" ]]; then
             # ARM64 交叉编译依赖
             # 关键：在添加 arm64 架构之前，先限制 security.ubuntu.com 只用于 amd64
-            # 使用 Python 脚本可靠地修改所有源文件
-            python3 << 'EOF'
-import re
-import glob
-import os
-
-def fix_security_sources(file_path):
-    """修改源文件，给 security.ubuntu.com 添加 [arch=amd64] 限制"""
-    try:
-        if not os.path.exists(file_path):
-            return
-        
-        with open(file_path, 'r') as f:
-            lines = f.readlines()
-        
-        modified = False
-        new_lines = []
-        for line in lines:
-            # 如果行包含 security.ubuntu.com 且还没有 [arch= 限制
-            if 'security.ubuntu.com' in line and '[arch=' not in line:
-                # 匹配 deb 或 deb-src 开头的行
-                if re.match(r'^\s*(deb(?:-src)?)\s+', line):
-                    # 在 deb/deb-src 后面添加 [arch=amd64]
-                    line = re.sub(r'^(deb(?:-src)?)\s+', r'\1 [arch=amd64] ', line)
-                    modified = True
-            new_lines.append(line)
-        
-        if modified:
-            with open(file_path, 'w') as f:
-                f.writelines(new_lines)
-            print(f"Fixed: {file_path}")
-    except Exception as e:
-        print(f"Warning processing {file_path}: {e}")
-
-# 修改 sources.list
-fix_security_sources('/etc/apt/sources.list')
-
-# 修改 sources.list.d 中的所有文件
-for file_path in glob.glob('/etc/apt/sources.list.d/*.list'):
-    fix_security_sources(file_path)
-EOF
+            # 使用 sed 命令修改 sources.list（更简单可靠）
+            sudo sed -i.bak '/security\.ubuntu\.com/s/^deb /deb [arch=amd64] /' /etc/apt/sources.list
+            sudo sed -i.bak '/security\.ubuntu\.com/s/^deb-src /deb-src [arch=amd64] /' /etc/apt/sources.list
+            # 同样处理 sources.list.d 中的文件
+            for file in /etc/apt/sources.list.d/*.list; do
+              if [ -f "$file" ]; then
+                sudo sed -i.bak '/security\.ubuntu\.com/s/^deb /deb [arch=amd64] /' "$file"
+                sudo sed -i.bak '/security\.ubuntu\.com/s/^deb-src /deb-src [arch=amd64] /' "$file"
+              fi
+            done
             
             # 现在添加 arm64 架构
             sudo dpkg --add-architecture arm64
