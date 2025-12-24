@@ -80,18 +80,57 @@ jobs:
         run: |
           if [[ "${{ matrix.platform.target }}" == "aarch64-unknown-linux-gnu" ]]; then
             # ARM64 交叉编译依赖
-            # 添加 arm64 架构
+            # 关键：在添加 arm64 架构之前，先限制 security.ubuntu.com 只用于 amd64
+            # 使用 Python 脚本可靠地修改所有源文件
+            python3 << 'EOF'
+import re
+import glob
+import os
+
+def fix_security_sources(file_path):
+    """修改源文件，给 security.ubuntu.com 添加 [arch=amd64] 限制"""
+    try:
+        if not os.path.exists(file_path):
+            return
+        
+        with open(file_path, 'r') as f:
+            lines = f.readlines()
+        
+        modified = False
+        new_lines = []
+        for line in lines:
+            # 如果行包含 security.ubuntu.com 且还没有 [arch= 限制
+            if 'security.ubuntu.com' in line and '[arch=' not in line:
+                # 匹配 deb 或 deb-src 开头的行
+                if re.match(r'^\s*(deb(?:-src)?)\s+', line):
+                    # 在 deb/deb-src 后面添加 [arch=amd64]
+                    line = re.sub(r'^(deb(?:-src)?)\s+', r'\1 [arch=amd64] ', line)
+                    modified = True
+            new_lines.append(line)
+        
+        if modified:
+            with open(file_path, 'w') as f:
+                f.writelines(new_lines)
+            print(f"Fixed: {file_path}")
+    except Exception as e:
+        print(f"Warning processing {file_path}: {e}")
+
+# 修改 sources.list
+fix_security_sources('/etc/apt/sources.list')
+
+# 修改 sources.list.d 中的所有文件
+for file_path in glob.glob('/etc/apt/sources.list.d/*.list'):
+    fix_security_sources(file_path)
+EOF
+            
+            # 现在添加 arm64 架构
             sudo dpkg --add-architecture arm64
-            # 配置软件源：只从 ports 仓库获取 arm64 包，忽略 security.ubuntu.com 的错误
+            # 配置软件源：只从 ports 仓库获取 arm64 包
             echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ noble main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/arm64.list
             echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ noble-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64.list
             echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ noble-security main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64.list
-            # 更新软件包列表，忽略 security.ubuntu.com 的 404 错误（该源不支持 arm64）
-            # 配置 apt 忽略特定源的错误，然后更新
-            echo 'Acquire::Check-Valid-Until "false";' | sudo tee /etc/apt/apt.conf.d/99-ignore-errors
-            echo 'Acquire::AllowReleaseInfoChange "true";' | sudo tee -a /etc/apt/apt.conf.d/99-ignore-errors
-            # 即使某些源失败也继续执行（因为我们有正确的 ports 源）
-            sudo apt-get update || true
+            # 更新软件包列表
+            sudo apt-get update
             sudo apt-get install -y \
               gcc-aarch64-linux-gnu \
               g++-aarch64-linux-gnu \
