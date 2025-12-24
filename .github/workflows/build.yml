@@ -80,24 +80,18 @@ jobs:
         run: |
           if [[ "${{ matrix.platform.target }}" == "aarch64-unknown-linux-gnu" ]]; then
             # ARM64 交叉编译依赖
-            # 注释掉所有包含 security.ubuntu.com 的源（该源不支持 arm64）
-            sudo sed -i 's|^deb.*security\.ubuntu\.com|# &|g' /etc/apt/sources.list
-            sudo sed -i 's|^deb-src.*security\.ubuntu\.com|# &|g' /etc/apt/sources.list
-            # 同样处理 sources.list.d 中的文件
-            for file in /etc/apt/sources.list.d/*.list; do
-              if [ -f "$file" ]; then
-                sudo sed -i 's|^deb.*security\.ubuntu\.com|# &|g' "$file"
-                sudo sed -i 's|^deb-src.*security\.ubuntu\.com|# &|g' "$file"
-              fi
-            done
-            # 添加 arm64 架构并配置软件源（只从 ports 仓库获取 arm64 包）
+            # 添加 arm64 架构
             sudo dpkg --add-architecture arm64
-            # 创建临时 sources.list.d 配置，只从 ports 仓库获取 arm64 包
-            # 使用 noble (Ubuntu 24.04) 代号
+            # 配置软件源：只从 ports 仓库获取 arm64 包，忽略 security.ubuntu.com 的错误
             echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ noble main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/arm64.list
             echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ noble-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64.list
             echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ noble-security main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64.list
-            sudo apt-get update
+            # 更新软件包列表，忽略 security.ubuntu.com 的 404 错误（该源不支持 arm64）
+            # 配置 apt 忽略特定源的错误，然后更新
+            echo 'Acquire::Check-Valid-Until "false";' | sudo tee /etc/apt/apt.conf.d/99-ignore-errors
+            echo 'Acquire::AllowReleaseInfoChange "true";' | sudo tee -a /etc/apt/apt.conf.d/99-ignore-errors
+            # 即使某些源失败也继续执行（因为我们有正确的 ports 源）
+            sudo apt-get update || true
             sudo apt-get install -y \
               gcc-aarch64-linux-gnu \
               g++-aarch64-linux-gnu \
