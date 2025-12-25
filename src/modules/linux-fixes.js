@@ -141,11 +141,19 @@ function fixInputBorderRendering(log) {
 /**
  * 修复 a 标签下载问题
  * Linux WebKitGTK 要求 <a> 元素必须在 DOM 中才能响应 click()
- * 解决方案：拦截 HTMLAnchorElement.prototype.click，临时将元素添加到 DOM
+ * 解决方案：拦截 HTMLAnchorElement.prototype.click，临时将元素添加到 DOM，
+ * 并使用 dispatchEvent 触发真正的 MouseEvent
  */
 function fixDownloadInDocument(doc, log) {
   // 获取 iframe 的 window 对象
   const win = doc.defaultView || window;
+  
+  // 标记是否已经应用过修复（防止重复应用）
+  if (win.__linuxClickFixApplied) {
+    log('ℹ️ [Linux Fix] click 修复已应用，跳过');
+    return;
+  }
+  win.__linuxClickFixApplied = true;
   
   // 保存原始的 click 方法
   const originalClick = win.HTMLAnchorElement.prototype.click;
@@ -153,29 +161,38 @@ function fixDownloadInDocument(doc, log) {
   // 重写 click 方法
   win.HTMLAnchorElement.prototype.click = function() {
     const href = this.href || '';
-    const isInDOM = doc.body.contains(this);
+    const ownerDoc = this.ownerDocument || doc;
+    const isInDOM = ownerDoc.body && ownerDoc.body.contains(this);
     
     // 只处理有 href 且不在 DOM 中的 <a> 元素
     if (href && !isInDOM) {
       // 排除 javascript:, mailto:, tel: 等特殊协议
-      const isSpecialProtocol = /^(javascript|mailto|tel|data):/i.test(href);
+      const isSpecialProtocol = /^(javascript|mailto|tel):/i.test(href);
       
       if (!isSpecialProtocol) {
-        log(`📥 [Linux Fix] 检测到不在 DOM 中的 <a> 元素，临时添加: ${href.substring(0, 80)}...`);
+        log(`📥 [Linux Fix] 检测到不在 DOM 中的 <a> 元素: ${href.substring(0, 80)}...`);
         
         // 临时添加到 DOM（隐藏）
         this.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;pointer-events:none;';
-        doc.body.appendChild(this);
+        ownerDoc.body.appendChild(this);
         
-        // 调用原始 click
-        originalClick.call(this);
+        log(`📥 [Linux Fix] 已添加到 DOM，触发真正的点击事件...`);
+        
+        // 使用 dispatchEvent 触发真正的 MouseEvent，而不是调用 click()
+        const event = new MouseEvent('click', {
+          bubbles: true,
+          cancelable: true,
+          view: win
+        });
+        this.dispatchEvent(event);
         
         // 延迟移除，确保浏览器有时间处理
         setTimeout(() => {
           if (this.parentNode) {
             this.parentNode.removeChild(this);
+            log(`📥 [Linux Fix] 临时元素已移除`);
           }
-        }, 100);
+        }, 500);
         
         return;
       }
@@ -185,7 +202,7 @@ function fixDownloadInDocument(doc, log) {
     originalClick.call(this);
   };
 
-  log('🔧 Linux <a> 标签 click 修复已启用');
+  log('🔧 Linux <a> 标签 click 修复已启用 (使用 dispatchEvent)');
 }
 
 /**
