@@ -145,6 +145,68 @@ fn get_os_type() -> String {
     return "unknown".to_string();
 }
 
+/// 保存文件到下载目录（用于 Linux blob URL 下载问题）
+#[tauri::command]
+async fn save_file_to_downloads(filename: String, data: Vec<u8>) -> Result<String, String> {
+    use std::fs;
+
+    // 获取下载目录
+    let download_dir = dirs::download_dir()
+        .or_else(|| {
+            dirs::home_dir().map(|h| {
+                let downloads = h.join("Downloads");
+                if downloads.exists() {
+                    downloads
+                } else {
+                    let downloads_zh = h.join("下载");
+                    if downloads_zh.exists() {
+                        downloads_zh
+                    } else {
+                        downloads
+                    }
+                }
+            })
+        })
+        .ok_or("无法获取下载目录")?;
+
+    // 确保下载目录存在
+    if !download_dir.exists() {
+        fs::create_dir_all(&download_dir).map_err(|e| format!("创建下载目录失败: {}", e))?;
+    }
+
+    // 处理文件名冲突
+    let mut file_path = download_dir.join(&filename);
+    let mut counter = 1;
+    
+    while file_path.exists() {
+        let stem = std::path::Path::new(&filename)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("file");
+        let ext = std::path::Path::new(&filename)
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        
+        let new_filename = if ext.is_empty() {
+            format!("{} ({})", stem, counter)
+        } else {
+            format!("{} ({}).{}", stem, counter, ext)
+        };
+        
+        file_path = download_dir.join(new_filename);
+        counter += 1;
+    }
+
+    // 写入文件
+    fs::write(&file_path, &data).map_err(|e| format!("保存文件失败: {}", e))?;
+
+    let saved_path = file_path.to_string_lossy().to_string();
+    log!("📥 文件已保存: {}", saved_path);
+    
+    Ok(saved_path)
+}
+
 /// 设置页面缩放（使用 Tauri 2.0 WebView 原生缩放）
 #[tauri::command]
 async fn set_zoom(window: tauri::WebviewWindow, zoom_level: f64) -> Result<(), String> {
@@ -369,7 +431,8 @@ pub fn run() {
             set_window_title,
             create_new_window,
             get_download_dir,
-            get_os_type
+            get_os_type,
+            save_file_to_downloads
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
