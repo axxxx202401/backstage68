@@ -15,6 +15,7 @@ export function initZoom(log) {
   let zoomIndicator = null;
   let zoomTimeout = null;
   let isZooming = false; // 防止重叠的缩放操作
+  let pendingZoom = null; // 等待执行的缩放值（防止堆积）
 
   function createZoomIndicator() {
     if (!zoomIndicator) {
@@ -55,26 +56,84 @@ export function initZoom(log) {
     }, 1000);
   }
 
-  // 执行缩放（无延迟）
+  // 获取非活动的 iframe 列表
+  function getInactiveIframes() {
+    if (!window.tauriTabs || !window.tauriTabs.tabs) return [];
+    
+    const activeId = window.tauriTabs.activeTabId;
+    return window.tauriTabs.tabs
+      .filter(t => t.id !== activeId && t.iframe)
+      .map(t => t.iframe);
+  }
+
+  // 隐藏非活动 iframe（减少渲染负担）
+  function hideInactiveIframes(iframes) {
+    iframes.forEach(iframe => {
+      iframe._originalVisibility = iframe.style.visibility;
+      iframe.style.visibility = 'hidden';
+    });
+  }
+
+  // 逐帧恢复非活动 iframe
+  async function showInactiveIframesGradually(iframes) {
+    for (const iframe of iframes) {
+      await new Promise(resolve => {
+        requestAnimationFrame(() => {
+          iframe.style.visibility = iframe._originalVisibility || '';
+          delete iframe._originalVisibility;
+          resolve();
+        });
+      });
+    }
+  }
+
+  // 执行缩放（优化版：隐藏非活动 iframe 减少渲染压力）
   async function applyZoom(zoom) {
+    // 如果正在缩放，只保存最新值，不排队
     if (isZooming) {
-      return; // 防止重叠操作
+      pendingZoom = zoom;
+      return;
     }
     
     isZooming = true;
+    let targetZoom = zoom;
+    
     try {
-      currentZoom = zoom;
-      if (window.tauriTabs) {
-        window.tauriTabs.currentZoom = zoom;
-      }
-      showZoomIndicator(zoom);
-      
-      // 通过 Rust command 调用 Tauri 原生缩放
-      if (window.__TAURI__ && window.__TAURI__.core) {
-        await window.__TAURI__.core.invoke('set_zoom', { zoomLevel: zoom });
-        log(`✅ 已应用缩放: ${Math.round(zoom * 100)}%`);
-      } else {
-        log.error("⚠️ Tauri API 不可用");
+      while (true) {
+        pendingZoom = null;
+        
+        currentZoom = targetZoom;
+        if (window.tauriTabs) {
+          window.tauriTabs.currentZoom = targetZoom;
+        }
+        showZoomIndicator(targetZoom);
+        
+        // 获取非活动 iframe
+        const inactiveIframes = getInactiveIframes();
+        
+        // 隐藏非活动 iframe（减少渲染负担）
+        if (inactiveIframes.length > 0) {
+          hideInactiveIframes(inactiveIframes);
+        }
+        
+        // 通过 Rust command 调用 Tauri 原生缩放
+        if (window.__TAURI__ && window.__TAURI__.core) {
+          await window.__TAURI__.core.invoke('set_zoom', { zoomLevel: targetZoom });
+          log(`✅ 已应用缩放: ${Math.round(targetZoom * 100)}%`);
+        } else {
+          log.error("⚠️ Tauri API 不可用");
+        }
+        
+        // 逐帧恢复非活动 iframe
+        if (inactiveIframes.length > 0) {
+          await showInactiveIframesGradually(inactiveIframes);
+        }
+        
+        // 检查是否有新请求
+        if (pendingZoom === null) {
+          break; // 没有新请求，结束
+        }
+        targetZoom = pendingZoom; // 有新请求，继续执行
       }
     } catch (err) {
       log.error("缩放失败:", err);
