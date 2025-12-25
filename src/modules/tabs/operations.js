@@ -143,6 +143,17 @@ function setupIframeEvents(iframeDoc, log) {
     
     if (!isCtrlOrCmd) return;
     
+    // Ctrl+F / Cmd+F: 页面搜索（优先级最高）
+    if (e.key === 'f') {
+      e.preventDefault();
+      e.stopPropagation();
+      // 调用父窗口的搜索功能
+      if (window.tauriTabs && window.tauriTabs.showPageSearch) {
+        window.tauriTabs.showPageSearch();
+      }
+      return;
+    }
+    
     // 缩放快捷键
     if (e.key === '+' || e.key === '=') {
       e.preventDefault();

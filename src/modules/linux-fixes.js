@@ -3,8 +3,7 @@
  * 
  * 修复的问题：
  * 1. 双击选中整行问题（WebKitGTK 行为差异）
- * 2. input 边框显示不完整（亚像素渲染问题）
- * 3. 颜色/对比度优化
+ * 2. a 标签下载问题（WebKitGTK 下载处理）
  */
 
 import { isLinux } from './utils/dom.js';
@@ -23,7 +22,7 @@ export function initLinuxFixes(log) {
   // 修复1: 双击选中行为
   fixDoubleClickSelection(log);
 
-  // 修复2: input 边框显示问题
+  // 修复2: input 边框显示问题（轻量版）
   fixInputBorderRendering(log);
 
   log('✅ Linux 修复已应用');
@@ -41,6 +40,9 @@ export function applyLinuxFixesToIframe(iframeDoc, log) {
 
     // 修复双击选中行为
     fixDoubleClickInDocument(iframeDoc, log);
+
+    // 修复 a 标签下载问题
+    fixDownloadInDocument(iframeDoc, log);
 
     log('✅ iframe Linux 修复已应用');
   } catch (err) {
@@ -137,7 +139,76 @@ function fixInputBorderRendering(log) {
 }
 
 /**
+ * 修复 a 标签下载问题
+ * Linux WebKitGTK 对于 JS 触发的 a 标签点击下载可能无法正常工作
+ */
+function fixDownloadInDocument(doc, log) {
+  // 监听 click 事件，处理带 download 属性或 blob URL 的 a 标签
+  doc.addEventListener('click', (e) => {
+    const link = e.target.closest('a');
+    if (!link) return;
+
+    const href = link.href || '';
+    const hasDownloadAttr = link.hasAttribute('download');
+    const isBlobUrl = href.startsWith('blob:');
+    const isDataUrl = href.startsWith('data:');
+
+    // 只处理下载链接
+    if (!hasDownloadAttr && !isBlobUrl && !isDataUrl) return;
+
+    log(`📥 检测到下载链接: ${href.substring(0, 50)}...`);
+
+    // 对于 blob URL，尝试使用 fetch 下载
+    if (isBlobUrl || isDataUrl) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const filename = link.download || 'download';
+      
+      // 使用 fetch 获取 blob 数据
+      fetch(href)
+        .then(response => response.blob())
+        .then(blob => {
+          // 创建新的 blob URL
+          const url = URL.createObjectURL(blob);
+          
+          // 创建临时 a 标签并触发下载
+          const tempLink = doc.createElement('a');
+          tempLink.href = url;
+          tempLink.download = filename;
+          tempLink.style.display = 'none';
+          doc.body.appendChild(tempLink);
+          
+          // 使用 dispatchEvent 触发点击（比直接 click() 更可靠）
+          const clickEvent = new MouseEvent('click', {
+            view: doc.defaultView,
+            bubbles: true,
+            cancelable: true
+          });
+          tempLink.dispatchEvent(clickEvent);
+          
+          // 清理
+          setTimeout(() => {
+            doc.body.removeChild(tempLink);
+            URL.revokeObjectURL(url);
+          }, 100);
+          
+          log(`✅ 已触发下载: ${filename}`);
+        })
+        .catch(err => {
+          log(`❌ 下载失败: ${err.message}`);
+          // 回退到原始行为
+          window.open(href, '_blank');
+        });
+    }
+  }, true);
+
+  log('🔧 Linux 下载修复已启用');
+}
+
+/**
  * 注入 Linux 专用样式
+ * 注意：边框问题是由缩放引起的，不需要额外的边框样式修复
  */
 function injectLinuxStyles(doc, log) {
   if (!doc.head) return;
@@ -148,87 +219,21 @@ function injectLinuxStyles(doc, log) {
   const style = doc.createElement('style');
   style.id = 'tauri-linux-fixes-style';
   style.textContent = `
-    /* ========== Linux 专用修复样式 ========== */
+    /* ========== Linux 专用修复样式（轻量版） ========== */
 
-    /* 修复 input 边框显示不完整 - 使用 box-shadow 代替 border */
+    /* 防止亚像素渲染问题导致的边框闪烁 */
     input, textarea, select {
-      /* 确保边框完整显示 */
-      border-width: 1px !important;
-      border-style: solid !important;
-      /* 使用 box-shadow 增强边框可见性 */
-      box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.1), inset 0 0 0 0.5px rgba(0, 0, 0, 0.05) !important;
-      /* 防止亚像素渲染问题 */
       -webkit-transform: translateZ(0);
       transform: translateZ(0);
     }
 
-    /* 增强聚焦状态边框 */
-    input:focus, textarea:focus, select:focus {
-      outline: none !important;
-      box-shadow: 0 0 0 1px #1890ff, 0 0 0 3px rgba(24, 144, 255, 0.2) !important;
-    }
-
-    /* 修复 Ant Design / Element UI 等框架的输入框 */
-    .ant-input, .ant-select-selector, .el-input__inner, .el-textarea__inner {
-      box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.15) !important;
-    }
-
-    .ant-input:focus, .ant-input-focused,
-    .ant-select-focused .ant-select-selector,
-    .el-input__inner:focus, .el-textarea__inner:focus {
-      box-shadow: 0 0 0 1px #1890ff, 0 0 0 3px rgba(24, 144, 255, 0.2) !important;
-    }
-
-    /* 修复表格单元格边框 */
-    table, th, td {
-      border-collapse: separate !important;
-      border-spacing: 0 !important;
-    }
-
-    th, td {
-      /* 使用更粗的边框确保可见 */
-      border-width: 1px !important;
-    }
-
-    /* 增强文本选择的对比度 */
-    ::selection {
-      background: #1890ff !important;
-      color: #fff !important;
-    }
-
-    ::-moz-selection {
-      background: #1890ff !important;
-      color: #fff !important;
-    }
-
     /* 防止双击选中整行 - 限制选择范围 */
     p, div, span, li, td, th, label {
-      /* 优化单词选择边界 */
       word-break: break-word;
       overflow-wrap: break-word;
     }
-
-    /* 修复滚动条样式（增强对比度）*/
-    ::-webkit-scrollbar {
-      width: 10px;
-      height: 10px;
-    }
-
-    ::-webkit-scrollbar-track {
-      background: #f0f0f0;
-    }
-
-    ::-webkit-scrollbar-thumb {
-      background: #888;
-      border-radius: 5px;
-      border: 2px solid #f0f0f0;
-    }
-
-    ::-webkit-scrollbar-thumb:hover {
-      background: #666;
-    }
   `;
   doc.head.appendChild(style);
-  log('🎨 Linux 修复样式已注入');
+  log('🎨 Linux 轻量修复样式已注入');
 }
 

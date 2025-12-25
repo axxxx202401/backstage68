@@ -4,7 +4,7 @@
 
 import { createTab, closeTab, activateTab, refreshTab, duplicateTab, openTabInNewWindow, closeTabsToLeft, closeTabsToRight, closeOtherTabs, reorderTabs, getTabCurrentUrl, switchToNextTab, switchToPrevTab } from './operations.js';
 import { setupSimpleDrag } from './drag-simple.js';
-import { isMac, isLinux } from '../utils/dom.js';
+import { isMac, isLinux, isWindows } from '../utils/dom.js';
 
 // 初始化事件监听
 export function initTabEvents() {
@@ -28,6 +28,10 @@ export function initTabEvents() {
   
   window.tauriTabs.showContextMenu = showTabContextMenu;
   console.log('✅ showContextMenu 设置完成');
+  
+  // 暴露页面搜索功能（供 iframe 调用）
+  window.tauriTabs.showPageSearch = showPageSearch;
+  console.log('✅ showPageSearch 设置完成');
   
   // 添加上下文菜单样式和手势指示器样式
   if (document.head) {
@@ -754,21 +758,21 @@ function setupMouseGestures() {
       log('🚫 阻止右键菜单显示（检测到手势滑动）');
       
       // 根据操作系统调整手势方向
-      // Mac: 右滑=上一个，左滑=下一个（符合自然滚动习惯）
+      // Mac/Linux: 右滑=上一个，左滑=下一个（符合自然滚动习惯）
       // Windows: 右滑=下一个，左滑=上一个（符合传统鼠标习惯）
-      const isMacSystem = isMac();
+      const useNaturalScroll = isMac() || isLinux();
       
       if (gestureDirection === 'right') {
-        if (isMacSystem) {
-          log('✅ 触发右滑手势（Mac），切换到上一个标签（左边）');
+        if (useNaturalScroll) {
+          log('✅ 触发右滑手势（自然滚动），切换到上一个标签（左边）');
           switchToPrevTab();
         } else {
           log('✅ 触发右滑手势（Windows），切换到下一个标签（右边）');
           switchToNextTab();
         }
       } else if (gestureDirection === 'left') {
-        if (isMacSystem) {
-          log('✅ 触发左滑手势（Mac），切换到下一个标签（右边）');
+        if (useNaturalScroll) {
+          log('✅ 触发左滑手势（自然滚动），切换到下一个标签（右边）');
           switchToNextTab();
         } else {
           log('✅ 触发左滑手势（Windows），切换到上一个标签（左边）');
