@@ -140,70 +140,142 @@ function fixInputBorderRendering(log) {
 
 /**
  * 修复 a 标签下载问题
- * Linux WebKitGTK 对于 JS 触发的 a 标签点击下载可能无法正常工作
+ * Linux WebKitGTK 对于 JS 创建的 blob URL 下载不工作
+ * 解决方案：拦截 blob URL 下载，通过 Tauri Rust 端保存文件
  */
 function fixDownloadInDocument(doc, log) {
-  // 监听 click 事件，处理带 download 属性或 blob URL 的 a 标签
-  doc.addEventListener('click', (e) => {
-    const link = e.target.closest('a');
-    if (!link) return;
-
-    const href = link.href || '';
-    const hasDownloadAttr = link.hasAttribute('download');
-    const isBlobUrl = href.startsWith('blob:');
-    const isDataUrl = href.startsWith('data:');
-
-    // 只处理下载链接
-    if (!hasDownloadAttr && !isBlobUrl && !isDataUrl) return;
-
-    log(`📥 检测到下载链接: ${href.substring(0, 50)}...`);
-
-    // 对于 blob URL，尝试使用 fetch 下载
-    if (isBlobUrl || isDataUrl) {
-      e.preventDefault();
-      e.stopPropagation();
-
-      const filename = link.download || 'download';
+  // 保存文件到下载目录
+  async function saveToDownloads(blob, filename) {
+    try {
+      const buffer = await blob.arrayBuffer();
+      const uint8Array = new Uint8Array(buffer);
+      const data = Array.from(uint8Array);
       
-      // 使用 fetch 获取 blob 数据
-      fetch(href)
-        .then(response => response.blob())
-        .then(blob => {
-          // 创建新的 blob URL
-          const url = URL.createObjectURL(blob);
-          
-          // 创建临时 a 标签并触发下载
-          const tempLink = doc.createElement('a');
-          tempLink.href = url;
-          tempLink.download = filename;
-          tempLink.style.display = 'none';
-          doc.body.appendChild(tempLink);
-          
-          // 使用 dispatchEvent 触发点击（比直接 click() 更可靠）
-          const clickEvent = new MouseEvent('click', {
-            view: doc.defaultView,
-            bubbles: true,
-            cancelable: true
-          });
-          tempLink.dispatchEvent(clickEvent);
-          
-          // 清理
-          setTimeout(() => {
-            doc.body.removeChild(tempLink);
-            URL.revokeObjectURL(url);
-          }, 100);
-          
-          log(`✅ 已触发下载: ${filename}`);
-        })
-        .catch(err => {
-          log(`❌ 下载失败: ${err.message}`);
-          // 回退到原始行为
-          window.open(href, '_blank');
+      log(`📥 正在保存文件: ${filename} (${data.length} bytes)`);
+      
+      // 调用 Tauri Rust 端保存文件
+      if (window.__TAURI__ && window.__TAURI__.core) {
+        const savedPath = await window.__TAURI__.core.invoke('save_file_to_downloads', {
+          filename: filename,
+          data: data
         });
+        log(`✅ 文件已保存: ${savedPath}`);
+        
+        // 显示保存成功提示
+        showDownloadNotification(filename, savedPath);
+        return true;
+      } else {
+        log('⚠️ Tauri API 不可用');
+        return false;
+      }
+    } catch (err) {
+      log(`❌ 保存文件失败: ${err}`);
+      return false;
     }
-  }, true);
+  }
+  
+  // 显示下载成功通知
+  function showDownloadNotification(filename, path) {
+    const notification = doc.createElement('div');
+    notification.style.cssText = `
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: rgba(40, 167, 69, 0.95);
+      color: white;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      z-index: 99999999;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      animation: slideIn 0.3s ease-out;
+      max-width: 300px;
+      word-break: break-all;
+    `;
+    notification.innerHTML = `✅ 已下载: ${filename}`;
+    
+    // 添加动画样式
+    const style = doc.createElement('style');
+    style.textContent = `
+      @keyframes slideIn {
+        from { transform: translateX(100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+      }
+    `;
+    doc.head.appendChild(style);
+    doc.body.appendChild(notification);
+    
+    setTimeout(() => {
+      notification.style.animation = 'slideIn 0.3s ease-out reverse';
+      setTimeout(() => notification.remove(), 300);
+    }, 3000);
+  }
+  
+  // 拦截动态创建的 a 标签
+  const originalCreateElement = doc.createElement.bind(doc);
+  
+  doc.createElement = function(tagName) {
+    const element = originalCreateElement(tagName);
+    
+    if (tagName.toLowerCase() === 'a') {
+      // 保存原始的 click 方法
+      const originalClick = element.click.bind(element);
+      
+      // 重写 click 方法
+      element.click = async function() {
+        const href = this.href || '';
+        const isBlobUrl = href.startsWith('blob:');
+        const isDataUrl = href.startsWith('data:');
+        
+        if (isBlobUrl || isDataUrl) {
+          log(`📥 拦截 blob/data URL 下载: ${href.substring(0, 50)}...`);
+          
+          try {
+            const response = await fetch(href);
+            const blob = await response.blob();
+            
+            // 获取文件名
+            let filename = this.download || 'download';
+            
+            // 尝试从 Content-Type 获取扩展名
+            if (!filename.includes('.')) {
+              const type = blob.type;
+              const extMap = {
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+                'application/vnd.ms-excel': '.xls',
+                'application/pdf': '.pdf',
+                'text/csv': '.csv',
+                'application/zip': '.zip',
+                'image/png': '.png',
+                'image/jpeg': '.jpg',
+                'application/json': '.json',
+                'text/plain': '.txt'
+              };
+              filename += extMap[type] || '';
+            }
+            
+            // 通过 Tauri 保存文件
+            const saved = await saveToDownloads(blob, filename);
+            if (saved) {
+              return; // 保存成功，不执行原始 click
+            }
+          } catch (err) {
+            log(`⚠️ 拦截下载失败: ${err.message}`);
+          }
+          
+          // 失败时回退到原始行为
+          originalClick();
+        } else {
+          // 非 blob URL，正常执行
+          originalClick();
+        }
+      };
+    }
+    
+    return element;
+  };
 
-  log('🔧 Linux 下载修复已启用');
+  log('🔧 Linux blob URL 下载修复已启用');
 }
 
 /**
