@@ -8,8 +8,9 @@ const MIN_ZOOM = 0.25;   // 25%
 const MAX_ZOOM = 5.0;    // 500%
 const ZOOM_STEP = 0.05;  // 5%
 
-// Linux 系统的缩放防抖时间（毫秒）
-const LINUX_ZOOM_DEBOUNCE = 100;
+// 缩放防抖时间（毫秒）- 根据标签数量动态调整
+const BASE_ZOOM_DEBOUNCE = 50;
+const LINUX_ZOOM_DEBOUNCE_MULTIPLIER = 3; // Linux 需要更长的防抖
 
 export function initZoom(log) {
   log("🔍 初始化缩放模块...");
@@ -19,10 +20,29 @@ export function initZoom(log) {
   let zoomTimeout = null;
   let zoomDebounceTimer = null;
   let pendingZoom = null;
+  let isZooming = false; // 防止重叠的缩放操作
   const isLinuxSystem = isLinux();
   
   if (isLinuxSystem) {
-    log("🐧 Linux 系统检测到，启用缩放防抖优化");
+    log("🐧 Linux 系统检测到，启用缩放性能优化");
+  }
+  
+  // 根据当前标签数量计算防抖时间
+  function getDebounceTime() {
+    const tabCount = window.tauriTabs?.tabs?.length || 1;
+    let baseTime = BASE_ZOOM_DEBOUNCE;
+    
+    // 标签数量越多，防抖时间越长
+    if (tabCount > 5) {
+      baseTime += (tabCount - 5) * 20; // 每多一个标签增加 20ms
+    }
+    
+    // Linux 系统需要更长的防抖时间
+    if (isLinuxSystem) {
+      baseTime *= LINUX_ZOOM_DEBOUNCE_MULTIPLIER;
+    }
+    
+    return Math.min(baseTime, 500); // 最大 500ms
   }
 
   function createZoomIndicator() {
@@ -66,12 +86,17 @@ export function initZoom(log) {
 
   // 实际执行缩放的函数
   async function doApplyZoom(zoom) {
+    if (isZooming) {
+      log('⏳ 缩放操作进行中，跳过');
+      return;
+    }
+    
+    isZooming = true;
     try {
       currentZoom = zoom;
       if (window.tauriTabs) {
         window.tauriTabs.currentZoom = zoom;
       }
-      showZoomIndicator(zoom);
       
       // 通过 Rust command 调用 Tauri 原生缩放（缩放整个窗口包括标签栏）
       if (window.__TAURI__ && window.__TAURI__.core) {
@@ -83,32 +108,31 @@ export function initZoom(log) {
     } catch (err) {
       log.error("缩放失败:", err);
       console.error("缩放失败:", err);
+    } finally {
+      isZooming = false;
     }
   }
 
-  // 带防抖的缩放函数（优化 Linux 多窗口性能）
+  // 带防抖的缩放函数（优化多标签性能）
   async function applyZoom(zoom) {
     // 立即更新指示器显示
     showZoomIndicator(zoom);
     
-    // 非 Linux 系统直接执行
-    if (!isLinuxSystem) {
-      return doApplyZoom(zoom);
-    }
-    
-    // Linux 系统使用防抖
+    // 取消之前的等待中的缩放
     pendingZoom = zoom;
     
     if (zoomDebounceTimer) {
       clearTimeout(zoomDebounceTimer);
     }
     
+    const debounceTime = getDebounceTime();
+    
     zoomDebounceTimer = setTimeout(async () => {
       if (pendingZoom !== null) {
         await doApplyZoom(pendingZoom);
         pendingZoom = null;
       }
-    }, LINUX_ZOOM_DEBOUNCE);
+    }, debounceTime);
   }
 
   async function zoomIn() {
