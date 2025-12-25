@@ -143,65 +143,60 @@ function fixInputBorderRendering(log) {
  * Linux WebKitGTK 对于 JS 触发的 a 标签点击下载可能无法正常工作
  */
 function fixDownloadInDocument(doc, log) {
-  // 监听 click 事件，处理带 download 属性或 blob URL 的 a 标签
-  doc.addEventListener('click', (e) => {
-    const link = e.target.closest('a');
-    if (!link) return;
-
-    const href = link.href || '';
-    const hasDownloadAttr = link.hasAttribute('download');
-    const isBlobUrl = href.startsWith('blob:');
-    const isDataUrl = href.startsWith('data:');
-
-    // 只处理下载链接
-    if (!hasDownloadAttr && !isBlobUrl && !isDataUrl) return;
-
-    log(`📥 检测到下载链接: ${href.substring(0, 50)}...`);
-
-    // 对于 blob URL，尝试使用 fetch 下载
-    if (isBlobUrl || isDataUrl) {
-      e.preventDefault();
-      e.stopPropagation();
-
-      const filename = link.download || 'download';
-      
-      // 使用 fetch 获取 blob 数据
-      fetch(href)
-        .then(response => response.blob())
-        .then(blob => {
-          // 创建新的 blob URL
-          const url = URL.createObjectURL(blob);
+  // 监听动态创建的 a 标签下载
+  // 拦截 createElement 来监控下载链接的创建
+  const originalCreateElement = doc.createElement.bind(doc);
+  
+  doc.createElement = function(tagName) {
+    const element = originalCreateElement(tagName);
+    
+    if (tagName.toLowerCase() === 'a') {
+      // 监听 click 事件
+      element.addEventListener('click', function(e) {
+        const href = this.href || '';
+        const hasDownload = this.hasAttribute('download');
+        const isBlobUrl = href.startsWith('blob:');
+        const isDataUrl = href.startsWith('data:');
+        
+        if ((hasDownload || isBlobUrl || isDataUrl) && (isBlobUrl || isDataUrl)) {
+          log(`📥 拦截下载: ${href.substring(0, 50)}...`);
           
-          // 创建临时 a 标签并触发下载
-          const tempLink = doc.createElement('a');
-          tempLink.href = url;
-          tempLink.download = filename;
-          tempLink.style.display = 'none';
-          doc.body.appendChild(tempLink);
+          e.preventDefault();
+          e.stopPropagation();
           
-          // 使用 dispatchEvent 触发点击（比直接 click() 更可靠）
-          const clickEvent = new MouseEvent('click', {
-            view: doc.defaultView,
-            bubbles: true,
-            cancelable: true
-          });
-          tempLink.dispatchEvent(clickEvent);
+          const filename = this.download || 'download';
           
-          // 清理
-          setTimeout(() => {
-            doc.body.removeChild(tempLink);
-            URL.revokeObjectURL(url);
-          }, 100);
-          
-          log(`✅ 已触发下载: ${filename}`);
-        })
-        .catch(err => {
-          log(`❌ 下载失败: ${err.message}`);
-          // 回退到原始行为
-          window.open(href, '_blank');
-        });
+          // 使用 Blob 转 ArrayBuffer 然后保存
+          fetch(href)
+            .then(res => res.blob())
+            .then(blob => {
+              // 尝试通过 Tauri 的 dialog API 保存文件
+              if (window.__TAURI__ && window.__TAURI__.dialog) {
+                blob.arrayBuffer().then(buffer => {
+                  const uint8Array = new Uint8Array(buffer);
+                  // 这里可以调用 Tauri 保存文件 API
+                  log(`📥 Blob 大小: ${uint8Array.length} bytes`);
+                });
+              }
+              
+              // 回退方案：直接打开 URL
+              const newUrl = URL.createObjectURL(blob);
+              window.open(newUrl, '_blank');
+              
+              setTimeout(() => URL.revokeObjectURL(newUrl), 5000);
+              log(`✅ 已打开下载窗口: ${filename}`);
+            })
+            .catch(err => {
+              log(`❌ 下载处理失败: ${err.message}`);
+              // 最后尝试直接打开
+              window.open(href, '_blank');
+            });
+        }
+      }, true);
     }
-  }, true);
+    
+    return element;
+  };
 
   log('🔧 Linux 下载修复已启用');
 }
