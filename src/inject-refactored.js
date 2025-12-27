@@ -70,7 +70,7 @@ import { initDownload } from './modules/download.js';
     initTabs(log, invoke);
 
     // 5. Linux 特定修复（双击选中、边框渲染等）
-    initLinuxFixes(log);
+    initLinuxFixes(log, invoke);
 
     // 6. 下载目录检测（修复 Linux 下载目录问题）
     initDownload(log, invoke);

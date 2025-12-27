@@ -11,7 +11,7 @@ import { isLinux } from './utils/dom.js';
 /**
  * 初始化 Linux 修复
  */
-export function initLinuxFixes(log) {
+export function initLinuxFixes(log, invoke) {
   // 详细的平台检测日志
   log('🔍 [Linux Debug] 平台检测:');
   log(`   navigator.platform = "${navigator.platform}"`);
@@ -32,7 +32,7 @@ export function initLinuxFixes(log) {
   fixInputBorderRendering(log);
   
   // 修复3: 主文档的下载问题
-  fixDownloadInDocument(document, log);
+  fixDownloadInDocument(document, log, invoke);
 
   log('✅ Linux 修复已应用');
 }
@@ -58,6 +58,9 @@ export function applyLinuxFixesToIframe(iframeDoc, log) {
   try {
     log('🔧 [Linux Debug] 开始应用 iframe 修复...');
     
+    // 获取 invoke 函数（从全局 Tauri API）
+    const invoke = window.__TAURI__?.core?.invoke;
+    
     // 注入 Linux 修复样式到 iframe
     injectLinuxStyles(iframeDoc, log);
 
@@ -65,7 +68,7 @@ export function applyLinuxFixesToIframe(iframeDoc, log) {
     fixDoubleClickInDocument(iframeDoc, log);
 
     // 修复 a 标签下载问题
-    fixDownloadInDocument(iframeDoc, log);
+    fixDownloadInDocument(iframeDoc, log, invoke);
 
     log('✅ iframe Linux 修复已应用');
   } catch (err) {
@@ -167,8 +170,9 @@ function fixInputBorderRendering(log) {
  * Linux WebKitGTK 要求 <a> 元素必须在 DOM 中才能响应 click()
  * 解决方案：拦截 HTMLAnchorElement.prototype.click，临时将元素添加到 DOM，
  * 并使用 dispatchEvent 触发真正的 MouseEvent
+ * 对于 iframe 中的下载，使用 fetch + Tauri API 直接保存文件
  */
-function fixDownloadInDocument(doc, log) {
+function fixDownloadInDocument(doc, log, invoke) {
   const docName = doc === document ? '主文档' : 'iframe';
   log(`🔧 [Linux Fix] 开始应用下载修复到 ${docName}...`);
   
@@ -216,28 +220,259 @@ function fixDownloadInDocument(doc, log) {
       if (!isSpecialProtocol) {
         log(`📥 [Linux Fix] ⚡ 需要修复！临时添加到 DOM...`);
         
+        // 对于 iframe 中的下载，使用更直接的方法
+        const isInIframe = ownerDoc !== document;
+        
+        if (isInIframe) {
+          // iframe 中的下载：使用 fetch + Tauri API 直接保存文件
+          log(`📥 [Linux Fix] 检测到 iframe 中的下载，使用 fetch + Tauri API...`);
+          
+          // 检查是否有 Tauri invoke API
+          const tauriInvoke = invoke || window.__TAURI__?.core?.invoke;
+          
+          if (tauriInvoke) {
+            // 使用 fetch + Tauri API 保存文件
+            log(`📥 [Linux Fix] 开始下载文件...`);
+            
+            fetch(href, {
+              method: 'GET',
+              credentials: 'include',
+              headers: {
+                'Accept': '*/*'
+              }
+            })
+            .then(response => {
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+              }
+              
+              // 提取文件名（优先级：Content-Disposition > download 属性 > URL）
+              let filename = download || 'download';
+              
+              // 从 Content-Disposition 头中提取文件名
+              const contentDisposition = response.headers.get('Content-Disposition');
+              if (contentDisposition) {
+                log(`📥 [Linux Fix] Content-Disposition: ${contentDisposition}`);
+                
+                // 匹配 filename= 或 filename*= 格式
+                const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/i);
+                if (filenameMatch) {
+                  let extractedFilename = filenameMatch[1];
+                  
+                  // 移除引号
+                  if ((extractedFilename.startsWith('"') && extractedFilename.endsWith('"')) ||
+                      (extractedFilename.startsWith("'") && extractedFilename.endsWith("'"))) {
+                    extractedFilename = extractedFilename.slice(1, -1);
+                  }
+                  
+                  // 处理 RFC 5987 格式 (filename*=UTF-8''...)
+                  if (extractedFilename.startsWith("UTF-8''") || extractedFilename.startsWith("utf-8''")) {
+                    extractedFilename = decodeURIComponent(extractedFilename.substring(7));
+                  } else {
+                    // 尝试解码 URL 编码
+                    try {
+                      extractedFilename = decodeURIComponent(extractedFilename);
+                    } catch (e) {
+                      // 如果解码失败，使用原始值
+                    }
+                  }
+                  
+                  if (extractedFilename) {
+                    filename = extractedFilename;
+                    log(`📥 [Linux Fix] 从 Content-Disposition 提取文件名: ${filename}`);
+                  }
+                }
+              }
+              
+              // 如果还没有文件名，从 URL 中提取
+              if (!filename || filename === 'download') {
+                const urlPath = href.split('/').pop().split('?')[0];
+                if (urlPath) {
+                  try {
+                    filename = decodeURIComponent(urlPath);
+                    log(`📥 [Linux Fix] 从 URL 提取文件名: ${filename}`);
+                  } catch (e) {
+                    filename = urlPath;
+                    log(`📥 [Linux Fix] 从 URL 提取文件名（未解码）: ${filename}`);
+                  }
+                }
+              }
+              
+              // 获取 Content-Type
+              const contentType = response.headers.get('Content-Type') || '';
+              log(`📥 [Linux Fix] Content-Type: ${contentType}`);
+              
+              // 检查文件名是否有有效的扩展名
+              const filenameParts = filename.split('.');
+              const hasValidExtension = filenameParts.length > 1 && 
+                                       filenameParts[filenameParts.length - 1].length > 0 && 
+                                       filenameParts[filenameParts.length - 1].length <= 10; // 扩展名通常不超过10个字符
+              
+              log(`📥 [Linux Fix] 文件名检查: "${filename}", 是否有扩展名: ${hasValidExtension}`);
+              
+              // 如果文件名没有有效的扩展名，根据 Content-Type 添加
+              if (!hasValidExtension && contentType) {
+                log(`📥 [Linux Fix] 文件名没有扩展名，根据 Content-Type 添加扩展名...`);
+                let ext = '';
+                const contentTypeLower = contentType.toLowerCase();
+                
+                // Excel 文件类型检测（优先级从高到低）
+                if (contentTypeLower.includes('vnd.openxmlformats-officedocument.spreadsheetml.sheet')) {
+                  // 明确的 .xlsx 格式
+                  ext = '.xlsx';
+                } else if (contentTypeLower === 'application/vnd.ms-excel' || 
+                          (contentTypeLower.includes('vnd.ms-excel') && !contentTypeLower.includes('openxml'))) {
+                  // application/vnd.ms-excel 可能是 .xls 或 .xlsx
+                  // 根据文件大小和常见情况，优先使用 .xlsx（现代格式更常见）
+                  // 但也可以根据实际情况调整为 .xls
+                  ext = '.xlsx'; // 现代 Excel 文件更常见，使用 .xlsx
+                  log(`📥 [Linux Fix] 检测到 application/vnd.ms-excel，使用 .xlsx 扩展名`);
+                } else if (contentTypeLower.includes('excel') || contentTypeLower.includes('spreadsheet')) {
+                  ext = '.xlsx'; // 默认使用新格式
+                } else if (contentTypeLower.includes('csv') || contentTypeLower.includes('text/csv')) {
+                  ext = '.csv';
+                } else if (contentTypeLower.includes('pdf') || contentTypeLower.includes('application/pdf')) {
+                  ext = '.pdf';
+                } else if (contentTypeLower.includes('zip') || contentTypeLower.includes('application/zip')) {
+                  ext = '.zip';
+                } else if (contentTypeLower.includes('rar') || contentTypeLower.includes('application/x-rar')) {
+                  ext = '.rar';
+                } else if (contentTypeLower.includes('json') || contentTypeLower.includes('application/json')) {
+                  ext = '.json';
+                } else if (contentTypeLower.includes('xml') || contentTypeLower.includes('application/xml')) {
+                  ext = '.xml';
+                } else if (contentTypeLower.includes('text/plain')) {
+                  ext = '.txt';
+                }
+                
+                if (ext) {
+                  // 如果文件名以点结尾，直接替换；否则添加扩展名
+                  if (filename.endsWith('.')) {
+                    filename = filename.slice(0, -1) + ext;
+                  } else {
+                    filename = filename + ext;
+                  }
+                  log(`📥 [Linux Fix] 根据 Content-Type 添加扩展名: ${filename}`);
+                }
+              }
+              
+              // 如果还是没有文件名，使用默认名称
+              if (!filename || filename === 'download') {
+                const contentTypeLower = (contentType || '').toLowerCase();
+                let ext = '.bin';
+                if (contentTypeLower.includes('vnd.openxmlformats-officedocument.spreadsheetml.sheet') ||
+                    contentTypeLower.includes('excel') || contentTypeLower.includes('spreadsheet')) {
+                  ext = '.xlsx';
+                } else if (contentTypeLower.includes('csv')) {
+                  ext = '.csv';
+                } else if (contentTypeLower.includes('pdf')) {
+                  ext = '.pdf';
+                } else if (contentTypeLower.includes('zip')) {
+                  ext = '.zip';
+                }
+                filename = `download${ext}`;
+                log(`📥 [Linux Fix] 使用默认文件名: ${filename}`);
+              }
+              
+              log(`📥 [Linux Fix] 最终文件名: ${filename}`);
+              
+              // 获取文件内容
+              return response.arrayBuffer().then(arrayBuffer => {
+                return { arrayBuffer, filename };
+              });
+            })
+            .then(({ arrayBuffer, filename }) => {
+              log(`📥 [Linux Fix] ✓ 文件已获取，大小: ${arrayBuffer.byteLength} bytes`);
+              
+              // 转换为 Uint8Array
+              const bytes = new Uint8Array(arrayBuffer);
+              
+              // 调用 Tauri API 保存文件
+              return tauriInvoke('save_file_to_downloads', {
+                filename: filename,
+                data: Array.from(bytes)
+              });
+            })
+            .then(savedPath => {
+              log(`📥 [Linux Fix] ✅ 文件已保存到: ${savedPath}`);
+            })
+            .catch(err => {
+              log(`❌ [Linux Fix] 下载失败: ${err.message}`);
+              log(`❌ [Linux Fix] 错误详情: ${err.stack || err}`);
+              
+              // 备用方案：尝试 window.open
+              log(`📥 [Linux Fix] 尝试使用 window.open 作为备用...`);
+              try {
+                win.open(href, target || '_blank');
+                log(`📥 [Linux Fix] ✓ window.open 已调用`);
+              } catch (openErr) {
+                log(`❌ [Linux Fix] window.open 也失败: ${openErr.message}`);
+              }
+            });
+          } else {
+            // 没有 Tauri API，使用 window.open
+            log(`⚠️ [Linux Fix] Tauri API 不可用，使用 window.open...`);
+            try {
+              win.open(href, target || '_blank');
+              log(`📥 [Linux Fix] ✓ window.open 已调用`);
+            } catch (openErr) {
+              log(`❌ [Linux Fix] window.open 失败: ${openErr.message}`);
+            }
+          }
+          
+          return;
+        }
+        
+        // 主文档中的下载：使用 DOM + click 方式
+        const originalStyle = this.style.cssText;
+        
         // 临时添加到 DOM（隐藏）
-        this.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;pointer-events:none;';
+        this.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;pointer-events:none;width:1px;height:1px;';
         ownerDoc.body.appendChild(this);
         log(`📥 [Linux Fix] ✓ 已添加到 DOM`);
         
-        // 使用 dispatchEvent 触发真正的 MouseEvent
-        log(`📥 [Linux Fix] 触发 MouseEvent...`);
-        const event = new MouseEvent('click', {
-          bubbles: true,
-          cancelable: true,
-          view: win
-        });
-        this.dispatchEvent(event);
-        log(`📥 [Linux Fix] ✓ MouseEvent 已触发`);
-        
-        // 延迟移除
-        setTimeout(() => {
-          if (this.parentNode) {
-            this.parentNode.removeChild(this);
-            log(`📥 [Linux Fix] ✓ 临时元素已移除`);
+        // 等待一帧，确保元素已完全添加到 DOM
+        requestAnimationFrame(() => {
+          try {
+            // 先尝试使用原始的 click 方法（更可靠）
+            log(`📥 [Linux Fix] 调用原始 click 方法...`);
+            originalClick.call(this);
+            log(`📥 [Linux Fix] ✓ 原始 click 方法已调用`);
+            
+            // 延迟移除（增加延迟时间，确保下载已开始）
+            setTimeout(() => {
+              if (this.parentNode) {
+                // 恢复原始样式（如果有）
+                if (originalStyle) {
+                  this.style.cssText = originalStyle;
+                } else {
+                  this.removeAttribute('style');
+                }
+                this.parentNode.removeChild(this);
+                log(`📥 [Linux Fix] ✓ 临时元素已移除`);
+              }
+            }, 2000); // 增加到 2 秒，确保下载已开始
+          } catch (err) {
+            log(`❌ [Linux Fix] 调用 click 方法失败: ${err.message}`);
+            // 如果失败，尝试使用 window.open 作为最后手段
+            if (href && (!target || target === '_self')) {
+              log(`📥 [Linux Fix] 尝试使用 window.open 作为备用方案...`);
+              try {
+                win.open(href, target || '_self');
+                log(`📥 [Linux Fix] ✓ window.open 已调用`);
+              } catch (openErr) {
+                log(`❌ [Linux Fix] window.open 也失败: ${openErr.message}`);
+              }
+            }
+            // 仍然移除元素
+            setTimeout(() => {
+              if (this.parentNode) {
+                this.parentNode.removeChild(this);
+                log(`📥 [Linux Fix] ✓ 临时元素已移除（错误恢复）`);
+              }
+            }, 1000);
           }
-        }, 500);
+        });
         
         return;
       }
