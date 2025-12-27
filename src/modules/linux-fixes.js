@@ -12,6 +12,12 @@ import { isLinux } from './utils/dom.js';
  * 初始化 Linux 修复
  */
 export function initLinuxFixes(log) {
+  // 详细的平台检测日志
+  log('🔍 [Linux Debug] 平台检测:');
+  log(`   navigator.platform = "${navigator.platform}"`);
+  log(`   navigator.userAgent = "${navigator.userAgent}"`);
+  log(`   isLinux() = ${isLinux()}`);
+  
   if (!isLinux()) {
     log('ℹ️  非 Linux 系统，跳过 Linux 修复');
     return;
@@ -24,6 +30,9 @@ export function initLinuxFixes(log) {
 
   // 修复2: input 边框显示问题（轻量版）
   fixInputBorderRendering(log);
+  
+  // 修复3: 主文档的下载问题
+  fixDownloadInDocument(document, log);
 
   log('✅ Linux 修复已应用');
 }
@@ -32,9 +41,23 @@ export function initLinuxFixes(log) {
  * 在 iframe 中应用 Linux 修复
  */
 export function applyLinuxFixesToIframe(iframeDoc, log) {
-  if (!isLinux() || !iframeDoc) return;
+  log('🔍 [Linux Debug] applyLinuxFixesToIframe 被调用');
+  log(`🔍 [Linux Debug] isLinux() = ${isLinux()}`);
+  log(`🔍 [Linux Debug] iframeDoc = ${iframeDoc ? '存在' : '不存在'}`);
+  
+  if (!isLinux()) {
+    log('ℹ️ [Linux Debug] 非 Linux 系统，跳过 iframe 修复');
+    return;
+  }
+  
+  if (!iframeDoc) {
+    log('⚠️ [Linux Debug] iframeDoc 为空，跳过');
+    return;
+  }
 
   try {
+    log('🔧 [Linux Debug] 开始应用 iframe 修复...');
+    
     // 注入 Linux 修复样式到 iframe
     injectLinuxStyles(iframeDoc, log);
 
@@ -46,7 +69,8 @@ export function applyLinuxFixesToIframe(iframeDoc, log) {
 
     log('✅ iframe Linux 修复已应用');
   } catch (err) {
-    log(`⚠️  iframe Linux 修复失败: ${err.message}`);
+    log(`⚠️ iframe Linux 修复失败: ${err.message}`);
+    log(`⚠️ 错误堆栈: ${err.stack}`);
   }
 }
 
@@ -145,52 +169,73 @@ function fixInputBorderRendering(log) {
  * 并使用 dispatchEvent 触发真正的 MouseEvent
  */
 function fixDownloadInDocument(doc, log) {
+  const docName = doc === document ? '主文档' : 'iframe';
+  log(`🔧 [Linux Fix] 开始应用下载修复到 ${docName}...`);
+  
   // 获取 iframe 的 window 对象
   const win = doc.defaultView || window;
   
+  if (!win) {
+    log(`❌ [Linux Fix] ${docName} 的 window 对象不可用`);
+    return;
+  }
+  
   // 标记是否已经应用过修复（防止重复应用）
   if (win.__linuxClickFixApplied) {
-    log('ℹ️ [Linux Fix] click 修复已应用，跳过');
+    log(`ℹ️ [Linux Fix] ${docName} click 修复已应用，跳过`);
     return;
   }
   win.__linuxClickFixApplied = true;
   
   // 保存原始的 click 方法
   const originalClick = win.HTMLAnchorElement.prototype.click;
+  log(`🔧 [Linux Fix] ${docName} 原始 click 方法已保存: ${typeof originalClick}`);
   
   // 重写 click 方法
   win.HTMLAnchorElement.prototype.click = function() {
     const href = this.href || '';
+    const download = this.download || '';
+    const target = this.target || '';
     const ownerDoc = this.ownerDocument || doc;
     const isInDOM = ownerDoc.body && ownerDoc.body.contains(this);
+    
+    // 详细日志
+    log(`📥 [Linux Fix] <a>.click() 被调用:`);
+    log(`   href = "${href.substring(0, 100)}${href.length > 100 ? '...' : ''}"`);
+    log(`   download = "${download}"`);
+    log(`   target = "${target}"`);
+    log(`   isInDOM = ${isInDOM}`);
+    log(`   ownerDoc = ${ownerDoc === document ? '主文档' : 'iframe文档'}`);
     
     // 只处理有 href 且不在 DOM 中的 <a> 元素
     if (href && !isInDOM) {
       // 排除 javascript:, mailto:, tel: 等特殊协议
       const isSpecialProtocol = /^(javascript|mailto|tel):/i.test(href);
+      log(`   isSpecialProtocol = ${isSpecialProtocol}`);
       
       if (!isSpecialProtocol) {
-        log(`📥 [Linux Fix] 检测到不在 DOM 中的 <a> 元素: ${href.substring(0, 80)}...`);
+        log(`📥 [Linux Fix] ⚡ 需要修复！临时添加到 DOM...`);
         
         // 临时添加到 DOM（隐藏）
         this.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;pointer-events:none;';
         ownerDoc.body.appendChild(this);
+        log(`📥 [Linux Fix] ✓ 已添加到 DOM`);
         
-        log(`📥 [Linux Fix] 已添加到 DOM，触发真正的点击事件...`);
-        
-        // 使用 dispatchEvent 触发真正的 MouseEvent，而不是调用 click()
+        // 使用 dispatchEvent 触发真正的 MouseEvent
+        log(`📥 [Linux Fix] 触发 MouseEvent...`);
         const event = new MouseEvent('click', {
           bubbles: true,
           cancelable: true,
           view: win
         });
         this.dispatchEvent(event);
+        log(`📥 [Linux Fix] ✓ MouseEvent 已触发`);
         
-        // 延迟移除，确保浏览器有时间处理
+        // 延迟移除
         setTimeout(() => {
           if (this.parentNode) {
             this.parentNode.removeChild(this);
-            log(`📥 [Linux Fix] 临时元素已移除`);
+            log(`📥 [Linux Fix] ✓ 临时元素已移除`);
           }
         }, 500);
         
@@ -199,10 +244,11 @@ function fixDownloadInDocument(doc, log) {
     }
     
     // 元素已在 DOM 中或是特殊协议，正常执行
+    log(`📥 [Linux Fix] 使用原始 click 方法`);
     originalClick.call(this);
   };
 
-  log('🔧 Linux <a> 标签 click 修复已启用 (使用 dispatchEvent)');
+  log(`✅ [Linux Fix] ${docName} <a> 标签 click 修复已启用`);
 }
 
 /**

@@ -123,7 +123,9 @@ export function createIframe(url, log) {
         }
         
         // 在 iframe 内应用 Linux 修复（双击选中、边框样式等）
+        log('🔍 [Debug] 准备调用 applyLinuxFixesToIframe...');
         applyLinuxFixesToIframe(iframeDoc, log);
+        log('🔍 [Debug] applyLinuxFixesToIframe 调用完成');
       }
     } catch (err) {
       log(`⚠️  处理 iframe 事件失败: ${err.message}`);
