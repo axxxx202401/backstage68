@@ -26,6 +26,7 @@ hex = "0.4"
 uuid = { version = "1.7", features = ["v4", "serde"] }
 dirs = "5.0"
 hostname = "0.4"
+mac_address = "1.1"
 rsa = { version = "0.9", features = ["sha2"] }
 rand = "0.8"
 urlencoding = "2.1"
