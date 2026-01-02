@@ -1,5 +1,5 @@
 use crate::crypto::{encrypt_signature, generate_signature_data};
-use crate::fingerprint::get_device_fingerprint;
+use crate::fingerprint::{get_device_fingerprint, get_device_info_json};
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -154,8 +154,11 @@ pub async fn proxy_request(
     // 获取设备指纹
     let device_fingerprint = get_device_fingerprint();
 
-    // 生成签名数据：timestamp|fingerprint|url_hash
-    let signature_data = generate_signature_data(&timestamp, &device_fingerprint, &request.url);
+    // 获取设备详细信息
+    let device_info = get_device_info_json();
+
+    // 生成签名数据：timestamp|fingerprint|device_info_hash|url_hash
+    let signature_data = generate_signature_data(&timestamp, &device_fingerprint, &device_info, &request.url);
 
     log!("\n🔐 安全验证信息:");
     log!("   ⏰ Timestamp: {}", timestamp);
@@ -172,11 +175,13 @@ pub async fn proxy_request(
     req_builder = req_builder.header("X-Client-Signature", &encrypted_signature);
     req_builder = req_builder.header("X-Timestamp", &timestamp);
     req_builder = req_builder.header("X-Device-Fingerprint", &device_fingerprint);
+    req_builder = req_builder.header("X-Device-Info", &device_info);
 
     log!("\n✅ 已添加验证头:");
     log!("   X-Client-Signature: {}", encrypted_signature);
     log!("   X-Timestamp: {}", timestamp);
     log!("   X-Device-Fingerprint: {}", device_fingerprint);
+    log!("   X-Device-Info: {}", device_info);
 
     // 4. Set body (优先处理 multipart，其次是普通 body)
     if let Some(files) = &request.files {

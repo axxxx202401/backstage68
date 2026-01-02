@@ -1,5 +1,27 @@
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::process::Command;
+
+/// 设备详细信息结构体
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceInfo {
+    /// 设备唯一ID（Windows设备ID / macOS IOPlatformUUID / Linux machine-id）
+    pub device_id: String,
+    /// 设备名称（主机名）
+    pub device_name: String,
+    /// 操作系统名称
+    pub os: String,
+    /// 操作系统版本
+    pub os_version: String,
+    /// CPU 型号
+    pub cpu: String,
+    /// MAC 地址
+    pub mac_address: String,
+    /// 内网IP地址
+    pub local_ip: String,
+    /// 内存大小（可选）
+    pub memory: Option<String>,
+}
 
 /// 获取系统级硬件 UUID
 /// - macOS: IOPlatformUUID (硬件级，重置系统也不变)
@@ -225,6 +247,296 @@ fn get_disk_serial() -> Option<String> {
     }
 }
 
+/// 获取操作系统名称
+fn get_os_name() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = Command::new("sw_vers").arg("-productName").output() {
+            let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !name.is_empty() {
+                return name;
+            }
+        }
+        "macOS".to_string()
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(output) = Command::new("wmic")
+            .args(["os", "get", "Caption"])
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines().skip(1) {
+                let name = line.trim();
+                if !name.is_empty() && name != "Caption" {
+                    return name.to_string();
+                }
+            }
+        }
+        "Windows".to_string()
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // 读取 /etc/os-release
+        if let Ok(content) = std::fs::read_to_string("/etc/os-release") {
+            for line in content.lines() {
+                if line.starts_with("PRETTY_NAME=") {
+                    let value = line.trim_start_matches("PRETTY_NAME=").trim_matches('"');
+                    if !value.is_empty() {
+                        return value.to_string();
+                    }
+                }
+            }
+        }
+        "Linux".to_string()
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        std::env::consts::OS.to_string()
+    }
+}
+
+/// 获取操作系统版本
+fn get_os_version() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = Command::new("sw_vers").arg("-productVersion").output() {
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !version.is_empty() {
+                return version;
+            }
+        }
+        "unknown".to_string()
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(output) = Command::new("wmic")
+            .args(["os", "get", "Version"])
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines().skip(1) {
+                let version = line.trim();
+                if !version.is_empty() && version != "Version" {
+                    return version.to_string();
+                }
+            }
+        }
+        "unknown".to_string()
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // 读取 /etc/os-release
+        if let Ok(content) = std::fs::read_to_string("/etc/os-release") {
+            for line in content.lines() {
+                if line.starts_with("VERSION_ID=") {
+                    let value = line.trim_start_matches("VERSION_ID=").trim_matches('"');
+                    if !value.is_empty() {
+                        return value.to_string();
+                    }
+                }
+            }
+        }
+        // 备选：使用 uname
+        if let Ok(output) = Command::new("uname").arg("-r").output() {
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !version.is_empty() {
+                return version;
+            }
+        }
+        "unknown".to_string()
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        "unknown".to_string()
+    }
+}
+
+/// 获取 CPU 名称（用于显示）
+fn get_cpu_name() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = Command::new("sysctl")
+            .args(["-n", "machdep.cpu.brand_string"])
+            .output()
+        {
+            let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !name.is_empty() {
+                return name;
+            }
+        }
+        "unknown".to_string()
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(output) = Command::new("wmic")
+            .args(["cpu", "get", "Name"])
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines().skip(1) {
+                let name = line.trim();
+                if !name.is_empty() && name != "Name" {
+                    return name.to_string();
+                }
+            }
+        }
+        "unknown".to_string()
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(content) = std::fs::read_to_string("/proc/cpuinfo") {
+            for line in content.lines() {
+                if line.starts_with("model name") {
+                    if let Some(value) = line.split(':').nth(1) {
+                        let name = value.trim();
+                        if !name.is_empty() {
+                            return name.to_string();
+                        }
+                    }
+                }
+            }
+        }
+        "unknown".to_string()
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        "unknown".to_string()
+    }
+}
+
+/// 获取设备名称（主机名）
+fn get_device_name() -> String {
+    hostname::get()
+        .ok()
+        .and_then(|h| h.into_string().ok())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// 获取本机内网IP地址
+fn get_local_ip() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        // macOS: 使用 ipconfig getifaddr en0 获取有线网卡IP，或 en1 获取无线网卡IP
+        for interface in &["en0", "en1", "en2", "en3"] {
+            if let Ok(output) = Command::new("ipconfig")
+                .args(["getifaddr", interface])
+                .output()
+            {
+                let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !ip.is_empty() && (ip.starts_with("192.") || ip.starts_with("10.") || ip.starts_with("172.")) {
+                    return ip;
+                }
+            }
+        }
+        // 备选：解析 ifconfig 输出
+        if let Ok(output) = Command::new("ifconfig").output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if line.contains("inet ") && !line.contains("127.0.0.1") {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if let Some(idx) = parts.iter().position(|&x| x == "inet") {
+                        if let Some(ip) = parts.get(idx + 1) {
+                            if ip.starts_with("192.") || ip.starts_with("10.") || ip.starts_with("172.") {
+                                return ip.to_string();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        "unknown".to_string()
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // Windows: 使用 ipconfig 获取内网IP
+        if let Ok(output) = Command::new("ipconfig").output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if line.contains("IPv4") || line.contains("IP Address") {
+                    if let Some(ip_part) = line.split(':').nth(1) {
+                        let ip = ip_part.trim();
+                        if ip.starts_with("192.") || ip.starts_with("10.") || ip.starts_with("172.") {
+                            return ip.to_string();
+                        }
+                    }
+                }
+            }
+        }
+        "unknown".to_string()
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Linux: 使用 hostname -I 获取内网IP
+        if let Ok(output) = Command::new("hostname").arg("-I").output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for ip in stdout.split_whitespace() {
+                if ip.starts_with("192.") || ip.starts_with("10.") || ip.starts_with("172.") {
+                    return ip.to_string();
+                }
+            }
+            if let Some(ip) = stdout.split_whitespace().next() {
+                return ip.to_string();
+            }
+        }
+        // 备选：使用 ip addr
+        if let Ok(output) = Command::new("ip").args(["addr", "show"]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if line.contains("inet ") && !line.contains("127.0.0.1") {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if let Some(idx) = parts.iter().position(|&x| x == "inet") {
+                        if let Some(ip_cidr) = parts.get(idx + 1) {
+                            let ip = ip_cidr.split('/').next().unwrap_or("");
+                            if ip.starts_with("192.") || ip.starts_with("10.") || ip.starts_with("172.") {
+                                return ip.to_string();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        "unknown".to_string()
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        "unknown".to_string()
+    }
+}
+
+/// 获取完整的设备信息
+/// 返回包含设备ID、名称、操作系统、CPU、MAC地址等信息的结构体
+pub fn get_device_info() -> DeviceInfo {
+    DeviceInfo {
+        device_id: get_system_uuid().unwrap_or_else(|| "unknown".to_string()),
+        device_name: get_device_name(),
+        os: get_os_name(),
+        os_version: get_os_version(),
+        cpu: get_cpu_name(),
+        mac_address: get_mac_address().unwrap_or_else(|| "unknown".to_string()),
+        local_ip: get_local_ip(),
+        memory: None, // 可选，暂不实现
+    }
+}
+
+/// 获取设备信息的 JSON 字符串
+pub fn get_device_info_json() -> String {
+    let info = get_device_info();
+    serde_json::to_string(&info).unwrap_or_else(|_| "{}".to_string())
+}
+
 /// 生成稳定的设备指纹
 /// 基于多个硬件信息组合生成 SHA256 哈希，确保重启/重置后保持一致
 pub fn get_device_fingerprint() -> String {
@@ -326,5 +638,29 @@ mod tests {
             has_uuid || has_mac,
             "应该至少能获取到系统UUID或MAC地址"
         );
+    }
+
+    #[test]
+    fn test_device_info() {
+        // 测试获取设备详细信息
+        let info = get_device_info();
+        
+        println!("\n📱 设备详细信息:");
+        println!("   设备ID: {}", info.device_id);
+        println!("   设备名称: {}", info.device_name);
+        println!("   操作系统: {}", info.os);
+        println!("   系统版本: {}", info.os_version);
+        println!("   CPU: {}", info.cpu);
+        println!("   MAC地址: {}", info.mac_address);
+        println!("   内网IP: {}", info.local_ip);
+        
+        // 验证 JSON 序列化
+        let json = get_device_info_json();
+        println!("\n📦 JSON 格式:\n{}", json);
+        
+        // 验证必要字段不为空
+        assert!(!info.device_id.is_empty() || info.device_id == "unknown", "设备ID不应为空");
+        assert!(!info.device_name.is_empty(), "设备名称不应为空");
+        assert!(!info.os.is_empty(), "操作系统不应为空");
     }
 }

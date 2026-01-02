@@ -105,9 +105,9 @@ pub fn encrypt_signature(data: &str) -> Result<String, String> {
 }
 
 /// 生成验证签名数据
-/// 格式：timestamp|device_fingerprint|path_hash
+/// 格式：timestamp|device_fingerprint|device_info_hash|path_hash
 /// 注意：Nginx 会去掉 /base_api 前缀，所以我们也要去掉再哈希
-pub fn generate_signature_data(timestamp: &str, fingerprint: &str, url: &str) -> String {
+pub fn generate_signature_data(timestamp: &str, fingerprint: &str, device_info_json: &str, url: &str) -> String {
     use sha2::{Digest, Sha256};
 
     // 提取路径并去掉 /base_api 前缀（因为 Nginx 会去掉）
@@ -142,10 +142,17 @@ pub fn generate_signature_data(timestamp: &str, fingerprint: &str, url: &str) ->
     log!("   📝 Decoded path: {}", decoded_path);
 
     // 路径哈希
-    let mut hasher = Sha256::new();
-    hasher.update(decoded_path.as_bytes());
-    let path_hash = format!("{:x}", hasher.finalize());
+    let mut path_hasher = Sha256::new();
+    path_hasher.update(decoded_path.as_bytes());
+    let path_hash = format!("{:x}", path_hasher.finalize());
 
-    // 组合签名数据
-    format!("{}|{}|{}", timestamp, fingerprint, &path_hash[..16])
+    // 设备信息哈希（对整个 JSON 进行哈希）
+    let mut device_hasher = Sha256::new();
+    device_hasher.update(device_info_json.as_bytes());
+    let device_info_hash = format!("{:x}", device_hasher.finalize());
+
+    log!("   📝 Device info hash: {}", &device_info_hash[..16]);
+
+    // 组合签名数据：timestamp|fingerprint|device_info_hash|path_hash
+    format!("{}|{}|{}|{}", timestamp, fingerprint, &device_info_hash[..16], &path_hash[..16])
 }
