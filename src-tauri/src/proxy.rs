@@ -154,10 +154,14 @@ pub async fn proxy_request(
     // 获取设备指纹
     let device_fingerprint = get_device_fingerprint();
 
-    // 获取设备详细信息
+    // 获取设备详细信息（原始 JSON 用于签名计算）
     let device_info = get_device_info_json();
+    
+    // URL 编码后用于 HTTP 头传输（确保特殊字符不被改变）
+    let device_info_encoded = urlencoding::encode(&device_info).to_string();
 
     // 生成签名数据：timestamp|fingerprint|device_info_hash|url_hash
+    // 注意：签名使用原始 JSON，HTTP 头使用编码后的 JSON
     let signature_data = generate_signature_data(&timestamp, &device_fingerprint, &device_info, &request.url);
 
     log!("\n🔐 安全验证信息:");
@@ -175,13 +179,13 @@ pub async fn proxy_request(
     req_builder = req_builder.header("X-Client-Signature", &encrypted_signature);
     req_builder = req_builder.header("X-Timestamp", &timestamp);
     req_builder = req_builder.header("X-Device-Fingerprint", &device_fingerprint);
-    req_builder = req_builder.header("X-Device-Info", &device_info);
+    req_builder = req_builder.header("X-Device-Info", &device_info_encoded);
 
     log!("\n✅ 已添加验证头:");
     log!("   X-Client-Signature: {}", encrypted_signature);
     log!("   X-Timestamp: {}", timestamp);
     log!("   X-Device-Fingerprint: {}", device_fingerprint);
-    log!("   X-Device-Info: {}", device_info);
+    log!("   X-Device-Info (encoded): {}", device_info_encoded);
 
     // 4. Set body (优先处理 multipart，其次是普通 body)
     if let Some(files) = &request.files {
