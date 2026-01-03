@@ -1,6 +1,33 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::process::Command;
+use std::sync::OnceLock;
+
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+/// Windows: CREATE_NO_WINDOW 标志，防止命令行窗口闪烁
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+/// 创建命令（Windows 上隐藏窗口）
+#[cfg(target_os = "windows")]
+fn create_command(program: &str) -> Command {
+    let mut cmd = Command::new(program);
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
+/// 创建命令（非 Windows 平台直接创建）
+#[cfg(not(target_os = "windows"))]
+fn create_command(program: &str) -> Command {
+    Command::new(program)
+}
+
+/// 全局缓存：设备信息（只获取一次，避免每次请求都执行系统命令）
+static DEVICE_INFO_CACHE: OnceLock<DeviceInfo> = OnceLock::new();
+/// 全局缓存：设备信息 JSON 字符串
+static DEVICE_INFO_JSON_CACHE: OnceLock<String> = OnceLock::new();
 
 /// 设备详细信息结构体
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,7 +58,7 @@ fn get_system_uuid() -> Option<String> {
     #[cfg(target_os = "macos")]
     {
         // macOS: 使用 ioreg 获取 IOPlatformUUID
-        let output = Command::new("ioreg")
+        let output = create_command("ioreg")
             .args(["-rd1", "-c", "IOPlatformExpertDevice"])
             .output()
             .ok()?;
@@ -57,7 +84,7 @@ fn get_system_uuid() -> Option<String> {
     #[cfg(target_os = "windows")]
     {
         // Windows: 使用 wmic 获取 BIOS UUID
-        let output = Command::new("wmic")
+        let output = create_command("wmic")
             .args(["csproduct", "get", "UUID"])
             .output()
             .ok()?;
@@ -71,7 +98,7 @@ fn get_system_uuid() -> Option<String> {
         }
 
         // 备选: 获取主板序列号
-        let output = Command::new("wmic")
+        let output = create_command("wmic")
             .args(["baseboard", "get", "serialnumber"])
             .output()
             .ok()?;
@@ -133,7 +160,7 @@ fn get_mac_address() -> Option<String> {
 fn get_cpu_info() -> Option<String> {
     #[cfg(target_os = "macos")]
     {
-        let output = Command::new("sysctl")
+        let output = create_command("sysctl")
             .args(["-n", "machdep.cpu.brand_string"])
             .output()
             .ok()?;
@@ -146,7 +173,7 @@ fn get_cpu_info() -> Option<String> {
 
     #[cfg(target_os = "windows")]
     {
-        let output = Command::new("wmic")
+        let output = create_command("wmic")
             .args(["cpu", "get", "processorid"])
             .output()
             .ok()?;
@@ -188,7 +215,7 @@ fn get_cpu_info() -> Option<String> {
 fn get_disk_serial() -> Option<String> {
     #[cfg(target_os = "macos")]
     {
-        let output = Command::new("system_profiler")
+        let output = create_command("system_profiler")
             .args(["SPSerialATADataType", "-json"])
             .output()
             .ok()?;
@@ -212,7 +239,7 @@ fn get_disk_serial() -> Option<String> {
 
     #[cfg(target_os = "windows")]
     {
-        let output = Command::new("wmic")
+        let output = create_command("wmic")
             .args(["diskdrive", "get", "serialnumber"])
             .output()
             .ok()?;
@@ -251,7 +278,7 @@ fn get_disk_serial() -> Option<String> {
 fn get_os_name() -> String {
     #[cfg(target_os = "macos")]
     {
-        if let Ok(output) = Command::new("sw_vers").arg("-productName").output() {
+        if let Ok(output) = create_command("sw_vers").arg("-productName").output() {
             let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !name.is_empty() {
                 return name;
@@ -262,7 +289,7 @@ fn get_os_name() -> String {
 
     #[cfg(target_os = "windows")]
     {
-        if let Ok(output) = Command::new("wmic")
+        if let Ok(output) = create_command("wmic")
             .args(["os", "get", "Caption"])
             .output()
         {
@@ -303,7 +330,7 @@ fn get_os_name() -> String {
 fn get_os_version() -> String {
     #[cfg(target_os = "macos")]
     {
-        if let Ok(output) = Command::new("sw_vers").arg("-productVersion").output() {
+        if let Ok(output) = create_command("sw_vers").arg("-productVersion").output() {
             let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !version.is_empty() {
                 return version;
@@ -314,7 +341,7 @@ fn get_os_version() -> String {
 
     #[cfg(target_os = "windows")]
     {
-        if let Ok(output) = Command::new("wmic")
+        if let Ok(output) = create_command("wmic")
             .args(["os", "get", "Version"])
             .output()
         {
@@ -343,7 +370,7 @@ fn get_os_version() -> String {
             }
         }
         // 备选：使用 uname
-        if let Ok(output) = Command::new("uname").arg("-r").output() {
+        if let Ok(output) = create_command("uname").arg("-r").output() {
             let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !version.is_empty() {
                 return version;
@@ -362,7 +389,7 @@ fn get_os_version() -> String {
 fn get_cpu_name() -> String {
     #[cfg(target_os = "macos")]
     {
-        if let Ok(output) = Command::new("sysctl")
+        if let Ok(output) = create_command("sysctl")
             .args(["-n", "machdep.cpu.brand_string"])
             .output()
         {
@@ -376,7 +403,7 @@ fn get_cpu_name() -> String {
 
     #[cfg(target_os = "windows")]
     {
-        if let Ok(output) = Command::new("wmic")
+        if let Ok(output) = create_command("wmic")
             .args(["cpu", "get", "Name"])
             .output()
         {
@@ -428,7 +455,7 @@ fn get_local_ip() -> String {
     {
         // macOS: 使用 ipconfig getifaddr en0 获取有线网卡IP，或 en1 获取无线网卡IP
         for interface in &["en0", "en1", "en2", "en3"] {
-            if let Ok(output) = Command::new("ipconfig")
+            if let Ok(output) = create_command("ipconfig")
                 .args(["getifaddr", interface])
                 .output()
             {
@@ -439,7 +466,7 @@ fn get_local_ip() -> String {
             }
         }
         // 备选：解析 ifconfig 输出
-        if let Ok(output) = Command::new("ifconfig").output() {
+        if let Ok(output) = create_command("ifconfig").output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {
                 if line.contains("inet ") && !line.contains("127.0.0.1") {
@@ -460,7 +487,7 @@ fn get_local_ip() -> String {
     #[cfg(target_os = "windows")]
     {
         // Windows: 使用 ipconfig 获取内网IP
-        if let Ok(output) = Command::new("ipconfig").output() {
+        if let Ok(output) = create_command("ipconfig").output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {
                 if line.contains("IPv4") || line.contains("IP Address") {
@@ -479,7 +506,7 @@ fn get_local_ip() -> String {
     #[cfg(target_os = "linux")]
     {
         // Linux: 使用 hostname -I 获取内网IP
-        if let Ok(output) = Command::new("hostname").arg("-I").output() {
+        if let Ok(output) = create_command("hostname").arg("-I").output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for ip in stdout.split_whitespace() {
                 if ip.starts_with("192.") || ip.starts_with("10.") || ip.starts_with("172.") {
@@ -491,7 +518,7 @@ fn get_local_ip() -> String {
             }
         }
         // 备选：使用 ip addr
-        if let Ok(output) = Command::new("ip").args(["addr", "show"]).output() {
+        if let Ok(output) = create_command("ip").args(["addr", "show"]).output() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {
                 if line.contains("inet ") && !line.contains("127.0.0.1") {
@@ -516,9 +543,8 @@ fn get_local_ip() -> String {
     }
 }
 
-/// 获取完整的设备信息
-/// 返回包含设备ID、名称、操作系统、CPU、MAC地址等信息的结构体
-pub fn get_device_info() -> DeviceInfo {
+/// 内部函数：实际获取设备信息（只调用一次）
+fn fetch_device_info() -> DeviceInfo {
     DeviceInfo {
         device_id: get_system_uuid().unwrap_or_else(|| "unknown".to_string()),
         device_name: get_device_name(),
@@ -531,10 +557,18 @@ pub fn get_device_info() -> DeviceInfo {
     }
 }
 
-/// 获取设备信息的 JSON 字符串
+/// 获取完整的设备信息（带缓存，避免重复执行系统命令）
+/// 返回包含设备ID、名称、操作系统、CPU、MAC地址等信息的结构体
+pub fn get_device_info() -> DeviceInfo {
+    DEVICE_INFO_CACHE.get_or_init(fetch_device_info).clone()
+}
+
+/// 获取设备信息的 JSON 字符串（带缓存）
 pub fn get_device_info_json() -> String {
-    let info = get_device_info();
-    serde_json::to_string(&info).unwrap_or_else(|_| "{}".to_string())
+    DEVICE_INFO_JSON_CACHE.get_or_init(|| {
+        let info = get_device_info();
+        serde_json::to_string(&info).unwrap_or_else(|_| "{}".to_string())
+    }).clone()
 }
 
 /// 生成稳定的设备指纹
