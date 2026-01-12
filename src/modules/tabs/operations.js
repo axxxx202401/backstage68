@@ -107,15 +107,13 @@ export function createIframe(url, log) {
   
   container.appendChild(iframe);
   
-  // iframe 加载完成后，设置代理和事件监听
-  iframe.addEventListener('load', () => {
-    inheritIframeProxy(iframe, log);
+  // 设置 iframe 事件的函数
+  const setupIframeEventsWrapper = () => {
     try {
       const iframeDoc = iframe.contentDocument;
       if (iframeDoc && window.self === window.top) {
         // 在 iframe 内部添加键盘事件监听器
         setupIframeEvents(iframeDoc, log);
-        log(`✅ iframe 事件监听器已安装`);
         
         // 在 iframe 内部添加手势监听器
         if (window.tauriTabs && window.tauriTabs.setupGestureInIframe) {
@@ -123,14 +121,42 @@ export function createIframe(url, log) {
         }
         
         // 在 iframe 内应用 Linux 修复（双击选中、边框样式等）
-        log('🔍 [Debug] 准备调用 applyLinuxFixesToIframe...');
         applyLinuxFixesToIframe(iframeDoc, log);
-        log('🔍 [Debug] applyLinuxFixesToIframe 调用完成');
       }
     } catch (err) {
       log(`⚠️  处理 iframe 事件失败: ${err.message}`);
     }
+  };
+  
+  // iframe 加载完成后，设置代理和事件监听
+  iframe.addEventListener('load', () => {
+    inheritIframeProxy(iframe, log);
+    setupIframeEventsWrapper();
+    log(`✅ iframe 事件监听器已安装`);
   });
+  
+  // 定期检查并重新绑定事件（应对 SPA 内部路由变化）
+  // 每 2 秒检查一次，确保事件监听器仍然有效
+  const checkInterval = setInterval(() => {
+    try {
+      // 检查 iframe 是否还在 DOM 中
+      if (!iframe.isConnected) {
+        clearInterval(checkInterval);
+        return;
+      }
+      
+      const iframeDoc = iframe.contentDocument;
+      if (iframeDoc && !iframeDoc.__tauriEventsSetup) {
+        log('🔄 检测到 iframe document 变化，重新绑定事件');
+        setupIframeEventsWrapper();
+      }
+    } catch (err) {
+      // 跨域错误，忽略
+    }
+  }, 2000);
+  
+  // 保存 interval ID 以便清理
+  iframe.__checkInterval = checkInterval;
   
   return iframe;
 }
@@ -139,8 +165,15 @@ export function createIframe(url, log) {
 function setupIframeEvents(iframeDoc, log) {
   const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
   
-  // 键盘事件
-  iframeDoc.addEventListener('keydown', (e) => {
+  // 标记已绑定，避免重复绑定
+  if (iframeDoc.__tauriEventsSetup) {
+    log('⚠️ iframe 事件已绑定，跳过');
+    return;
+  }
+  iframeDoc.__tauriEventsSetup = true;
+  
+  // 键盘事件处理函数
+  const handleKeydown = (e) => {
     const isCtrlOrCmd = isMac ? e.metaKey : e.ctrlKey;
     
     if (!isCtrlOrCmd) return;
@@ -152,6 +185,17 @@ function setupIframeEvents(iframeDoc, log) {
       // 调用父窗口的搜索功能
       if (window.tauriTabs && window.tauriTabs.showPageSearch) {
         window.tauriTabs.showPageSearch();
+      }
+      return;
+    }
+    
+    // Cmd+Shift+R: 强制刷新（清除缓存）- 放在最前面优先处理
+    if ((e.key === 'R' || e.key === 'r') && e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      log('🔄 检测到 Cmd+Shift+R 快捷键');
+      if (window.tauriTabs && window.tauriTabs.activeTabId && window.tauriTabs.hardRefreshTab) {
+        window.tauriTabs.hardRefreshTab(window.tauriTabs.activeTabId);
       }
       return;
     }
@@ -196,7 +240,22 @@ function setupIframeEvents(iframeDoc, log) {
         }
       }
     }
-  }, true);
+  };
+  
+  // 在 document 和 window 两个级别都监听，确保捕获
+  iframeDoc.addEventListener('keydown', handleKeydown, true);
+  
+  // 也在 contentWindow 上监听（某些 SPA 可能在 window 级别拦截）
+  try {
+    const iframeWindow = iframeDoc.defaultView;
+    if (iframeWindow && !iframeWindow.__tauriKeydownSetup) {
+      iframeWindow.__tauriKeydownSetup = true;
+      iframeWindow.addEventListener('keydown', handleKeydown, true);
+      log('✅ iframe window 键盘事件已绑定');
+    }
+  } catch (err) {
+    log(`⚠️ 无法在 iframe window 绑定事件: ${err.message}`);
+  }
   
   // 鼠标滚轮缩放
   iframeDoc.addEventListener('wheel', (e) => {
@@ -360,6 +419,10 @@ export function closeTab(id) {
   if (tab.titleCheckInterval) {
     clearInterval(tab.titleCheckInterval);
   }
+  // 清理 iframe 事件检查定时器
+  if (tab.iframe && tab.iframe.__checkInterval) {
+    clearInterval(tab.iframe.__checkInterval);
+  }
   
   tab.element.remove();
   tab.iframe.remove();
@@ -381,6 +444,43 @@ export function refreshTab(tabId) {
   
   window.tauriTabs.log(`🔄 刷新标签: ${tabId}`);
   tab.iframe.src = tab.iframe.src;
+}
+
+// 强制刷新标签（清除缓存）
+export function hardRefreshTab(tabId) {
+  const tab = window.tauriTabs.tabs.find(t => t.id === tabId);
+  if (!tab) return;
+  
+  window.tauriTabs.log(`🔄 强制刷新标签（清除缓存）: ${tabId}`);
+  
+  // 获取当前 URL
+  let currentUrl = tab.url;
+  try {
+    const iframeUrl = tab.iframe.contentWindow?.location?.href;
+    if (iframeUrl && !iframeUrl.startsWith('about:')) {
+      currentUrl = iframeUrl;
+    }
+  } catch (e) {
+    // 跨域无法访问，使用原始 URL
+  }
+  
+  window.tauriTabs.log(`   当前 URL: ${currentUrl}`);
+  
+  // 方法：先设为 about:blank 清空，再重新加载原 URL
+  // 这样可以强制 WebView 重新请求资源
+  const iframe = tab.iframe;
+  
+  // 保存原 URL
+  const originalUrl = currentUrl;
+  
+  // 先清空
+  iframe.src = 'about:blank';
+  
+  // 短暂延迟后重新加载原 URL
+  setTimeout(() => {
+    iframe.src = originalUrl;
+    window.tauriTabs.log(`   重新加载: ${originalUrl}`);
+  }, 50);
 }
 
 export function getTabCurrentUrl(tab, log) {

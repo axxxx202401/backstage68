@@ -3,7 +3,7 @@
  */
 
 import { createTabBar, updateTabWidths, TAB_CONFIG } from './ui.js';
-import { createTab, closeTab, activateTab, duplicateTab, reorderTabs, switchToNextTab, switchToPrevTab } from './operations.js';
+import { createTab, closeTab, activateTab, duplicateTab, reorderTabs, switchToNextTab, switchToPrevTab, hardRefreshTab } from './operations.js';
 import { initTabEvents } from './events.js';
 import { showTabSearch } from './search.js';
 
@@ -119,29 +119,31 @@ export function initTabs(log, invoke) {
   window.tauriTabs.reorderTabs = reorderTabs;
   window.tauriTabs.switchToNextTab = switchToNextTab;
   window.tauriTabs.switchToPrevTab = switchToPrevTab;
+  window.tauriTabs.hardRefreshTab = hardRefreshTab;
   window.tauriTabs.showSearch = showTabSearch;
   window.tauriTabs.updateTabWidths = updateTabWidths;
 
   log("✅ 标签页模块已启用");
   console.log("🎉 标签页功能已启用:");
-  console.log("  ╔════════════════════════════════════╗");
-  console.log("  ║  快捷键                            ║");
-  console.log("  ╠════════════════════════════════════╣");
-  console.log("  ║  Cmd+T          新建标签           ║");
-  console.log("  ║  Cmd+W          关闭当前标签       ║");
-  console.log("  ║  Cmd+Shift+A    搜索标签           ║");
-  console.log("  ║  Cmd+Shift+N    新窗口（多窗口）   ║");
-  console.log("  ║  Cmd+1~9        切换到第 N 个标签  ║");
-  console.log("  ╠════════════════════════════════════╣");
-  console.log("  ║  鼠标操作                          ║");
-  console.log("  ╠════════════════════════════════════╣");
-  console.log("  ║  拖动标签        重新排序          ║");
-  console.log("  ║  右键标签        显示菜单          ║");
-  console.log("  ║  右键向右滑      切到上个标签      ║");
-  console.log("  ║  右键向左滑      切到下个标签      ║");
-  console.log("  ║  点击 🔍        搜索标签           ║");
-  console.log("  ║  点击 +          新建标签          ║");
-  console.log("  ╚════════════════════════════════════╝");
+  console.log("  ╔════════════════════════════════════════╗");
+  console.log("  ║  快捷键                                ║");
+  console.log("  ╠════════════════════════════════════════╣");
+  console.log("  ║  Cmd+T            新建标签             ║");
+  console.log("  ║  Cmd+W            关闭当前标签         ║");
+  console.log("  ║  Cmd+Shift+R      强制刷新（清除缓存） ║");
+  console.log("  ║  Cmd+Shift+A      搜索标签             ║");
+  console.log("  ║  Cmd+Shift+N      新窗口（多窗口）     ║");
+  console.log("  ║  Cmd+1~9          切换到第 N 个标签    ║");
+  console.log("  ╠════════════════════════════════════════╣");
+  console.log("  ║  鼠标操作                              ║");
+  console.log("  ╠════════════════════════════════════════╣");
+  console.log("  ║  拖动标签          重新排序            ║");
+  console.log("  ║  右键标签          显示菜单            ║");
+  console.log("  ║  右键向右滑        切到上个标签        ║");
+  console.log("  ║  右键向左滑        切到下个标签        ║");
+  console.log("  ║  点击 🔍          搜索标签             ║");
+  console.log("  ║  点击 +            新建标签            ║");
+  console.log("  ╚════════════════════════════════════════╝");
   console.log(`  最多支持 ${TAB_CONFIG.maxTabs} 个标签，动态宽度，拖动排序，搜索功能`);
 }
 

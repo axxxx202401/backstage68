@@ -2,7 +2,7 @@
  * 标签页事件模块 - 键盘快捷键、拖拽、右键菜单、鼠标手势
  */
 
-import { createTab, closeTab, activateTab, refreshTab, duplicateTab, openTabInNewWindow, closeTabsToLeft, closeTabsToRight, closeOtherTabs, reorderTabs, getTabCurrentUrl, switchToNextTab, switchToPrevTab } from './operations.js';
+import { createTab, closeTab, activateTab, refreshTab, hardRefreshTab, duplicateTab, openTabInNewWindow, closeTabsToLeft, closeTabsToRight, closeOtherTabs, reorderTabs, getTabCurrentUrl, switchToNextTab, switchToPrevTab } from './operations.js';
 import { setupSimpleDrag } from './drag-simple.js';
 import { isMac, isLinux, isWindows } from '../utils/dom.js';
 
@@ -115,6 +115,15 @@ function setupKeyboardShortcuts() {
       const currentUrl = activeTab ? activeTab.url : window.location.href;
       if (window.tauriOpenNewWindow) {
         window.tauriOpenNewWindow(currentUrl);
+      }
+    }
+    
+    // Cmd+Shift+R: 强制刷新（清除缓存）
+    else if (e.key === 'R' && e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (window.tauriTabs.activeTabId) {
+        hardRefreshTab(window.tauriTabs.activeTabId);
       }
     }
     
@@ -553,6 +562,7 @@ function showTabContextMenu(tabId, x, y) {
   
   const menuItems = [
     { text: '🔄 刷新', action: () => refreshTab(tabId) },
+    { text: '🧹 强制刷新（清除缓存）', action: () => hardRefreshTab(tabId) },
     { text: '📋 复制标签', action: () => duplicateTab(tabId) },
     { text: '🪟 在新窗口打开', action: () => openTabInNewWindow(tabId) },
     { divider: true },
