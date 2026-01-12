@@ -981,6 +981,8 @@ function showPageSearch() {
         currentMatchIndex = 0;
         highlightMatches(iframeDoc, query);
         scrollToMatch(0);
+        // 设置 DOM 变化监听，翻页时自动清除高亮
+        setupDomObserver();
       }
       
       updateCount();
@@ -991,8 +993,14 @@ function showPageSearch() {
   
   // 高亮匹配项
   function highlightMatches(iframeDoc, query) {
+    // 标记正在高亮，避免触发 DOM 观察器
+    isHighlighting = true;
+    
     // 清除旧的高亮
     clearHighlights();
+    
+    // 重新设置 matches（因为 clearHighlights 会清空）
+    // 注意：这里不能清空 matches，所以移除 clearHighlights 中的清空逻辑
     
     // 使用 CSS 高亮 API 或手动创建高亮元素
     matches.forEach((match, index) => {
@@ -1015,10 +1023,13 @@ function showPageSearch() {
         // 忽略无法高亮的情况（如跨节点选择）
       }
     });
+    
+    // 高亮完成
+    isHighlighting = false;
   }
   
-  // 清除高亮
-  function clearHighlights() {
+  // 清除高亮（只清除 DOM 元素，不清空 matches 数组）
+  function clearHighlights(alsoResetMatches = false) {
     const iframe = getActiveIframe();
     if (!iframe) return;
     
@@ -1027,12 +1038,111 @@ function showPageSearch() {
       const highlights = iframeDoc.querySelectorAll('.tauri-search-highlight');
       highlights.forEach(el => {
         const parent = el.parentNode;
-        parent.replaceChild(document.createTextNode(el.textContent), el);
-        parent.normalize();
+        if (parent) {
+          // 使用 iframeDoc 创建文本节点，而不是父窗口的 document
+          parent.replaceChild(iframeDoc.createTextNode(el.textContent), el);
+          parent.normalize();
+        }
       });
     } catch (err) {
       // 忽略错误
     }
+    
+    // 只在明确要求时才清空匹配记录
+    if (alsoResetMatches) {
+      matches = [];
+      currentMatchIndex = -1;
+    }
+  }
+  
+  // 设置 DOM 变化监听器，当页面内容变化时（如翻页）自动清除高亮
+  let domObserver = null;
+  let domObserverTimeout = null;
+  let isHighlighting = false; // 标记是否正在添加高亮
+  
+  function setupDomObserver() {
+    const iframe = getActiveIframe();
+    if (!iframe) return;
+    
+    // 清理旧的观察器和定时器
+    if (domObserver) {
+      domObserver.disconnect();
+      domObserver = null;
+    }
+    if (domObserverTimeout) {
+      clearTimeout(domObserverTimeout);
+    }
+    
+    // 延迟 500ms 启动观察器，等高亮操作完成
+    domObserverTimeout = setTimeout(() => {
+      try {
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+        
+        // 创建新的观察器
+        domObserver = new MutationObserver((mutations) => {
+          // 如果正在高亮操作中，忽略
+          if (isHighlighting) return;
+          
+          // 检查是否有大范围的 DOM 变化（如翻页）
+          let significantChanges = 0;
+          for (const mutation of mutations) {
+            // 忽略高亮元素相关的变化
+            if (mutation.target.classList && mutation.target.classList.contains('tauri-search-highlight')) {
+              continue;
+            }
+            if (mutation.target.closest && mutation.target.closest('.tauri-search-highlight')) {
+              continue;
+            }
+            
+            // 检查添加的节点是否是高亮元素
+            let isHighlightChange = false;
+            mutation.addedNodes.forEach(node => {
+              if (node.classList && node.classList.contains('tauri-search-highlight')) {
+                isHighlightChange = true;
+              }
+            });
+            if (isHighlightChange) continue;
+            
+            // 累计变化数量
+            significantChanges += mutation.addedNodes.length + mutation.removedNodes.length;
+          }
+          
+          // 如果有超过 10 个节点变化，认为是翻页等操作
+          if (significantChanges > 10) {
+            log(`🔄 检测到页面内容变化 (${significantChanges} 个节点)，重新搜索`);
+            // 断开观察器，避免重新搜索时再次触发
+            if (domObserver) {
+              domObserver.disconnect();
+              domObserver = null;
+            }
+            
+            // 获取当前搜索关键词
+            const currentQuery = input ? input.value : '';
+            if (currentQuery.trim()) {
+              // 清除旧高亮，但不清空搜索词
+              clearHighlights(false);
+              // 延迟重新搜索，等待 DOM 更新完成
+              setTimeout(() => {
+                searchInIframe(currentQuery);
+              }, 100);
+            } else {
+              clearHighlights(true);
+              updateCount();
+            }
+          }
+        });
+        
+        // 观察 body 的子元素变化
+        domObserver.observe(iframeDoc.body, {
+          childList: true,
+          subtree: true
+        });
+        
+        log('✅ DOM 变化观察器已设置');
+      } catch (err) {
+        log(`⚠️ 设置 DOM 观察器失败: ${err.message}`);
+      }
+    }, 500);
   }
   
   // 滚动到匹配项
@@ -1089,7 +1199,16 @@ function showPageSearch() {
   
   // 关闭搜索
   function closeSearch() {
-    clearHighlights();
+    // 清理 DOM 观察器和定时器
+    if (domObserver) {
+      domObserver.disconnect();
+      domObserver = null;
+    }
+    if (domObserverTimeout) {
+      clearTimeout(domObserverTimeout);
+      domObserverTimeout = null;
+    }
+    clearHighlights(true); // 关闭时清空匹配记录
     if (pageSearchOverlay) {
       pageSearchOverlay.remove();
       pageSearchOverlay = null;
