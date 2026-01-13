@@ -1059,6 +1059,32 @@ function showPageSearch() {
   let domObserver = null;
   let domObserverTimeout = null;
   let isHighlighting = false; // 标记是否正在添加高亮
+  let clickHandler = null; // 点击事件处理器（备用方案）
+  
+  // 处理页面变化（翻页等）的通用函数
+  function handlePageChange(reason) {
+    log(`🔄 ${reason}，重新搜索`);
+    
+    // 断开观察器
+    if (domObserver) {
+      domObserver.disconnect();
+      domObserver = null;
+    }
+    
+    // 获取当前搜索关键词
+    const currentQuery = input ? input.value : '';
+    if (currentQuery.trim()) {
+      // 清除旧高亮，但不清空搜索词
+      clearHighlights(false);
+      // 延迟重新搜索，等待 DOM 更新完成
+      setTimeout(() => {
+        searchInIframe(currentQuery);
+      }, 200);
+    } else {
+      clearHighlights(true);
+      updateCount();
+    }
+  }
   
   function setupDomObserver() {
     const iframe = getActiveIframe();
@@ -1077,6 +1103,36 @@ function showPageSearch() {
     domObserverTimeout = setTimeout(() => {
       try {
         const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+        
+        // 备用方案：监听点击事件（对 Windows WebView2 更可靠）
+        // 当点击分页按钮等元素时，延迟检查并重新搜索
+        if (clickHandler) {
+          iframeDoc.removeEventListener('click', clickHandler, true);
+        }
+        clickHandler = (e) => {
+          // 检查点击的是否是可能触发翻页的元素
+          const target = e.target;
+          const isPaginationClick = 
+            target.closest('.ant-pagination') || // Ant Design 分页
+            target.closest('.el-pagination') ||  // Element UI 分页
+            target.closest('.pagination') ||     // 通用分页
+            target.closest('[class*="page"]') || // 包含 page 的类名
+            target.closest('button') ||          // 按钮
+            target.closest('a');                 // 链接
+          
+          if (isPaginationClick && matches.length > 0) {
+            // 延迟检查，等待页面更新
+            setTimeout(() => {
+              // 检查高亮元素是否还存在于 DOM 中
+              const highlightsInDom = iframeDoc.querySelectorAll('.tauri-search-highlight');
+              if (highlightsInDom.length === 0 && matches.length > 0) {
+                // 高亮已被移除（页面已更新），重新搜索
+                handlePageChange('检测到点击后页面变化');
+              }
+            }, 300);
+          }
+        };
+        iframeDoc.addEventListener('click', clickHandler, true);
         
         // 创建新的观察器
         domObserver = new MutationObserver((mutations) => {
@@ -1109,26 +1165,7 @@ function showPageSearch() {
           
           // 如果有超过 10 个节点变化，认为是翻页等操作
           if (significantChanges > 10) {
-            log(`🔄 检测到页面内容变化 (${significantChanges} 个节点)，重新搜索`);
-            // 断开观察器，避免重新搜索时再次触发
-            if (domObserver) {
-              domObserver.disconnect();
-              domObserver = null;
-            }
-            
-            // 获取当前搜索关键词
-            const currentQuery = input ? input.value : '';
-            if (currentQuery.trim()) {
-              // 清除旧高亮，但不清空搜索词
-              clearHighlights(false);
-              // 延迟重新搜索，等待 DOM 更新完成
-              setTimeout(() => {
-                searchInIframe(currentQuery);
-              }, 100);
-            } else {
-              clearHighlights(true);
-              updateCount();
-            }
+            handlePageChange(`检测到 DOM 变化 (${significantChanges} 个节点)`);
           }
         });
         
@@ -1207,6 +1244,18 @@ function showPageSearch() {
     if (domObserverTimeout) {
       clearTimeout(domObserverTimeout);
       domObserverTimeout = null;
+    }
+    // 清理点击事件处理器
+    if (clickHandler) {
+      try {
+        const iframe = getActiveIframe();
+        if (iframe && iframe.contentDocument) {
+          iframe.contentDocument.removeEventListener('click', clickHandler, true);
+        }
+      } catch (err) {
+        // 忽略错误
+      }
+      clickHandler = null;
     }
     clearHighlights(true); // 关闭时清空匹配记录
     if (pageSearchOverlay) {
