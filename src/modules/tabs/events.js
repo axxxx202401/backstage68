@@ -888,7 +888,7 @@ let pageSearchOverlay = null;
 
 function showPageSearch() {
   const log = window.tauriTabs.log;
-  log('🔍 打开页面搜索');
+  log('🔍 打开页面搜索（覆盖层方案）');
   
   // 获取选中的文本（优先从 iframe 获取）
   let selectedText = '';
@@ -945,9 +945,15 @@ function showPageSearch() {
   const closeBtn = pageSearchOverlay.querySelector('.tauri-page-search-close');
   
   // 搜索状态
-  let highlights = [];  // 存储高亮元素引用
+  let matchRects = [];  // 存储匹配项的位置信息 {rects: DOMRect[], node, index, length}
+  let highlightElements = [];  // 存储覆盖层中的高亮元素
   let currentIndex = -1;
   let lastQuery = '';
+  let highlightOverlay = null;  // 高亮覆盖层
+  let scrollHandler = null;
+  let resizeHandler = null;
+  let mutationObserver = null;  // DOM 变化观察器
+  let mutationTimeout = null;   // 防抖定时器
   
   // 获取当前活动的 iframe
   function getActiveIframe() {
@@ -955,68 +961,124 @@ function showPageSearch() {
     return activeTab ? activeTab.iframe : null;
   }
   
-  // 注入高亮样式到 iframe
-  function injectHighlightStyles() {
-    const iframe = getActiveIframe();
-    if (!iframe) return;
+  // 创建高亮覆盖层
+  function createHighlightOverlay() {
+    if (highlightOverlay) return highlightOverlay;
     
-    try {
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-      if (iframeDoc.getElementById('tauri-search-highlight-style')) return;
-      
-      const style = iframeDoc.createElement('style');
-      style.id = 'tauri-search-highlight-style';
-      style.textContent = `
-        .tauri-search-highlight {
-          background-color: #ffff00 !important;
-          color: #000 !important;
-          border-radius: 2px;
-          box-shadow: 0 0 2px rgba(0,0,0,0.3);
-        }
-        .tauri-search-highlight.current {
-          background-color: #ff9632 !important;
-          box-shadow: 0 0 4px rgba(255, 150, 50, 0.8);
-        }
-      `;
-      iframeDoc.head.appendChild(style);
-      log('✅ 已注入搜索高亮样式');
-    } catch (err) {
-      // 忽略跨域错误
+    const iframe = getActiveIframe();
+    if (!iframe) return null;
+    
+    highlightOverlay = document.createElement('div');
+    highlightOverlay.className = 'tauri-highlight-overlay';
+    highlightOverlay.style.cssText = `
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 9999999;
+      overflow: hidden;
+    `;
+    
+    // 将覆盖层放在 iframe 的父容器中
+    const iframeParent = iframe.parentElement;
+    if (iframeParent) {
+      iframeParent.style.position = 'relative';
+      iframeParent.appendChild(highlightOverlay);
+    }
+    
+    return highlightOverlay;
+  }
+  
+  // 清除覆盖层中的高亮
+  function clearHighlights() {
+    highlightElements.forEach(el => el.remove());
+    highlightElements = [];
+    matchRects = [];
+  }
+  
+  // 移除覆盖层
+  function removeHighlightOverlay() {
+    if (highlightOverlay) {
+      highlightOverlay.remove();
+      highlightOverlay = null;
     }
   }
   
-  // 清除所有高亮（关键：在 DOM 被框架修改之前调用）
-  function clearHighlights() {
+  // 获取 iframe 内元素相对于 iframe 视口的位置
+  function getRectsRelativeToIframe(range, iframeDoc) {
+    const rects = range.getClientRects();
+    return Array.from(rects).map(rect => ({
+      top: rect.top,
+      left: rect.left,
+      width: rect.width,
+      height: rect.height
+    }));
+  }
+  
+  // 更新高亮位置（当滚动时调用）
+  function updateHighlightPositions() {
     const iframe = getActiveIframe();
-    if (!iframe) {
-      highlights = [];
-      return;
-    }
+    if (!iframe || !highlightOverlay) return;
     
     try {
       const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-      // 查找所有高亮元素并移除
-      const highlightElements = iframeDoc.querySelectorAll('.tauri-search-highlight');
-      highlightElements.forEach(el => {
+      const iframeWin = iframe.contentWindow;
+      const scrollX = iframeWin.scrollX || iframeWin.pageXOffset || 0;
+      const scrollY = iframeWin.scrollY || iframeWin.pageYOffset || 0;
+      
+      // 清除现有高亮元素
+      highlightElements.forEach(el => el.remove());
+      highlightElements = [];
+      
+      // 重新计算每个匹配项的位置
+      matchRects.forEach((match, matchIndex) => {
         try {
-          const parent = el.parentNode;
-          if (parent) {
-            const text = iframeDoc.createTextNode(el.textContent);
-            parent.replaceChild(text, el);
-            parent.normalize();
+          // 检查节点是否还存在
+          if (!match.node || !match.node.parentNode || !iframeDoc.contains(match.node)) {
+            return;
           }
+          
+          const range = iframeDoc.createRange();
+          range.setStart(match.node, match.index);
+          range.setEnd(match.node, match.index + match.length);
+          
+          const rects = range.getClientRects();
+          
+          Array.from(rects).forEach(rect => {
+            if (rect.width === 0 || rect.height === 0) return;
+            
+            const highlight = document.createElement('div');
+            highlight.className = 'tauri-overlay-highlight';
+            if (matchIndex === currentIndex) {
+              highlight.classList.add('current');
+            }
+            highlight.style.cssText = `
+              position: absolute;
+              left: ${rect.left}px;
+              top: ${rect.top}px;
+              width: ${rect.width}px;
+              height: ${rect.height}px;
+              background-color: ${matchIndex === currentIndex ? 'rgba(255, 150, 50, 0.5)' : 'rgba(255, 255, 0, 0.4)'};
+              border-radius: 2px;
+              pointer-events: none;
+              ${matchIndex === currentIndex ? 'box-shadow: 0 0 4px rgba(255, 150, 50, 0.8);' : ''}
+            `;
+            highlight.dataset.matchIndex = matchIndex;
+            highlightOverlay.appendChild(highlight);
+            highlightElements.push(highlight);
+          });
         } catch (e) {
           // 忽略单个元素的错误
         }
       });
     } catch (err) {
-      log(`⚠️ 清除高亮失败: ${err.message}`);
+      log(`⚠️ 更新高亮位置失败: ${err.message}`);
     }
-    
-    highlights = [];
   }
   
-  // 执行搜索并高亮所有匹配项
+  // 执行搜索（不修改 DOM）
   function searchAndHighlight(query) {
     // 先清除旧的高亮
     clearHighlights();
@@ -1033,10 +1095,13 @@ function showPageSearch() {
     
     try {
       const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+      const iframeWin = iframe.contentWindow;
       const queryLower = query.toLowerCase();
       
+      // 创建覆盖层
+      createHighlightOverlay();
+      
       // 收集所有匹配的文本节点和位置
-      const matches = [];
       const walker = iframeDoc.createTreeWalker(
         iframeDoc.body,
         NodeFilter.SHOW_TEXT,
@@ -1052,12 +1117,17 @@ function showPageSearch() {
           continue;
         }
         
+        // 跳过隐藏元素
+        if (parent && parent.offsetParent === null && parent.tagName !== 'BODY') {
+          continue;
+        }
+        
         const text = node.textContent;
         const textLower = text.toLowerCase();
         let index = 0;
         
         while ((index = textLower.indexOf(queryLower, index)) !== -1) {
-          matches.push({
+          matchRects.push({
             node,
             index,
             length: query.length
@@ -1066,126 +1136,224 @@ function showPageSearch() {
         }
       }
       
-      log(`🔍 找到 ${matches.length} 个匹配`);
+      log(`🔍 找到 ${matchRects.length} 个匹配（覆盖层方案）`);
       
-      // 从后往前处理匹配（避免索引偏移问题）
-      for (let i = matches.length - 1; i >= 0; i--) {
-        const match = matches[i];
-        try {
-          const range = iframeDoc.createRange();
-          range.setStart(match.node, match.index);
-          range.setEnd(match.node, match.index + match.length);
-          
-          const highlight = iframeDoc.createElement('span');
-          highlight.className = 'tauri-search-highlight';
-          range.surroundContents(highlight);
-          
-          highlights.unshift(highlight);  // 添加到开头，保持顺序
-        } catch (e) {
-          // 忽略无法高亮的情况
-        }
-      }
-      
-      // 如果有匹配，设置当前索引并滚动到第一个
-      if (highlights.length > 0) {
+      // 如果有匹配，设置当前索引
+      if (matchRects.length > 0) {
         currentIndex = 0;
-        updateCurrentHighlight();
-        scrollToCurrentHighlight();
       }
+      
+      // 绘制高亮
+      updateHighlightPositions();
+      
+      // 设置滚动监听器
+      setupScrollListener();
+      
+      // 设置 DOM 变化监听器
+      setupMutationObserver();
       
       updateCount();
-      
-      // 设置 mousedown 监听器，在用户点击时立即清除高亮
-      setupMousedownListener();
       
     } catch (err) {
       log(`⚠️ 搜索失败: ${err.message}`);
     }
   }
   
-  // 设置 mousedown 监听器（在框架更新 DOM 之前清除高亮）
-  let mousedownHandler = null;
+  // 设置滚动监听器
+  function setupScrollListener() {
+    const iframe = getActiveIframe();
+    if (!iframe) return;
+    
+    try {
+      const iframeWin = iframe.contentWindow;
+      
+      // 移除旧的监听器
+      if (scrollHandler) {
+        iframeWin.removeEventListener('scroll', scrollHandler, true);
+      }
+      if (resizeHandler) {
+        iframeWin.removeEventListener('resize', resizeHandler);
+      }
+      
+      // 使用 requestAnimationFrame 优化滚动性能
+      let ticking = false;
+      scrollHandler = () => {
+        if (!ticking) {
+          requestAnimationFrame(() => {
+            updateHighlightPositions();
+            ticking = false;
+          });
+          ticking = true;
+        }
+      };
+      
+      resizeHandler = () => {
+        updateHighlightPositions();
+      };
+      
+      iframeWin.addEventListener('scroll', scrollHandler, true);
+      iframeWin.addEventListener('resize', resizeHandler);
+      
+      // 也监听 iframe 内部的滚动容器
+      const iframeDoc = iframe.contentDocument || iframeWin.document;
+      iframeDoc.addEventListener('scroll', scrollHandler, true);
+      
+    } catch (err) {
+      log(`⚠️ 设置滚动监听器失败: ${err.message}`);
+    }
+  }
   
-  function setupMousedownListener() {
+  // 移除滚动监听器
+  function removeScrollListener() {
+    const iframe = getActiveIframe();
+    if (!iframe) return;
+    
+    try {
+      const iframeWin = iframe.contentWindow;
+      const iframeDoc = iframe.contentDocument || iframeWin.document;
+      
+      if (scrollHandler) {
+        iframeWin.removeEventListener('scroll', scrollHandler, true);
+        iframeDoc.removeEventListener('scroll', scrollHandler, true);
+        scrollHandler = null;
+      }
+      if (resizeHandler) {
+        iframeWin.removeEventListener('resize', resizeHandler);
+        resizeHandler = null;
+      }
+    } catch (e) {}
+  }
+  
+  // 设置 DOM 变化监听器（检测翻页等操作）
+  function setupMutationObserver() {
     const iframe = getActiveIframe();
     if (!iframe) return;
     
     try {
       const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
       
-      // 移除旧的监听器
-      if (mousedownHandler) {
-        iframeDoc.removeEventListener('mousedown', mousedownHandler, true);
+      // 移除旧的观察器
+      if (mutationObserver) {
+        mutationObserver.disconnect();
       }
       
-      mousedownHandler = (e) => {
-        // 如果点击的是高亮元素本身，忽略（允许选中高亮文本）
-        if (e.target.classList && e.target.classList.contains('tauri-search-highlight')) {
-          return;
+      mutationObserver = new MutationObserver((mutations) => {
+        // 使用防抖，避免频繁触发
+        if (mutationTimeout) {
+          clearTimeout(mutationTimeout);
         }
         
-        // 如果没有高亮元素，忽略
-        if (highlights.length === 0) return;
-        
-        // 立即清除高亮（关键：在框架更新 DOM 之前）
-        clearHighlights();
-        updateCount();
-      };
+        mutationTimeout = setTimeout(() => {
+          // 检查是否有实质性的 DOM 变化（排除我们自己的覆盖层）
+          const hasSignificantChange = mutations.some(mutation => {
+            // 忽略我们自己的覆盖层变化
+            if (mutation.target.closest && mutation.target.closest('.tauri-highlight-overlay')) {
+              return false;
+            }
+            // 检查是否有节点添加/删除
+            if (mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0) {
+              return true;
+            }
+            // 检查文本内容变化
+            if (mutation.type === 'characterData') {
+              return true;
+            }
+            return false;
+          });
+          
+          if (hasSignificantChange) {
+            log('🔄 检测到页面 DOM 变化，清除高亮');
+            clearHighlights();
+            updateCount();
+          }
+        }, 100);  // 100ms 防抖
+      });
       
-      // 使用 capture 模式，确保在其他处理器之前执行
-      iframeDoc.addEventListener('mousedown', mousedownHandler, true);
+      // 监听整个 body 的变化
+      mutationObserver.observe(iframeDoc.body, {
+        childList: true,      // 监听子节点变化
+        subtree: true,        // 监听所有后代节点
+        characterData: true,  // 监听文本内容变化
+      });
+      
+      log('✅ 已设置 DOM 变化监听器');
     } catch (err) {
-      log(`⚠️ 设置 mousedown 监听器失败: ${err.message}`);
+      log(`⚠️ 设置 DOM 变化监听器失败: ${err.message}`);
     }
   }
   
-  // 更新当前高亮
-  function updateCurrentHighlight() {
-    highlights.forEach((el, i) => {
-      if (el && el.classList) {
-        el.classList.toggle('current', i === currentIndex);
-      }
-    });
+  // 移除 DOM 变化监听器
+  function removeMutationObserver() {
+    if (mutationTimeout) {
+      clearTimeout(mutationTimeout);
+      mutationTimeout = null;
+    }
+    if (mutationObserver) {
+      mutationObserver.disconnect();
+      mutationObserver = null;
+    }
   }
   
   // 滚动到当前高亮
   function scrollToCurrentHighlight() {
-    if (currentIndex >= 0 && currentIndex < highlights.length) {
-      const el = highlights[currentIndex];
-      if (el && el.scrollIntoView) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
+    if (currentIndex < 0 || currentIndex >= matchRects.length) return;
+    
+    const iframe = getActiveIframe();
+    if (!iframe) return;
+    
+    try {
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+      const match = matchRects[currentIndex];
+      
+      if (!match.node || !match.node.parentNode) return;
+      
+      const range = iframeDoc.createRange();
+      range.setStart(match.node, match.index);
+      range.setEnd(match.node, match.index + match.length);
+      
+      const rect = range.getBoundingClientRect();
+      const iframeWin = iframe.contentWindow;
+      
+      // 计算需要滚动到的位置（使匹配项在视口中心）
+      const viewportHeight = iframeWin.innerHeight;
+      const scrollY = iframeWin.scrollY || iframeWin.pageYOffset || 0;
+      const targetY = scrollY + rect.top - viewportHeight / 2 + rect.height / 2;
+      
+      iframeWin.scrollTo({
+        top: Math.max(0, targetY),
+        behavior: 'smooth'
+      });
+      
+      // 滚动后更新高亮位置
+      setTimeout(updateHighlightPositions, 300);
+    } catch (err) {
+      log(`⚠️ 滚动到高亮失败: ${err.message}`);
     }
   }
   
   // 更新计数显示
   function updateCount() {
-    if (highlights.length === 0) {
+    if (matchRects.length === 0) {
       countDisplay.textContent = '0/0';
       countDisplay.style.color = '#999';
     } else {
-      countDisplay.textContent = `${currentIndex + 1}/${highlights.length}`;
+      countDisplay.textContent = `${currentIndex + 1}/${matchRects.length}`;
       countDisplay.style.color = '#fff';
     }
   }
   
-  // 检查高亮元素是否还存在于 DOM 中
-  function checkHighlightsValid() {
-    if (highlights.length === 0) return false;
+  // 检查匹配项是否还有效
+  function checkMatchesValid() {
+    if (matchRects.length === 0) return false;
     
-    // 检查第一个高亮元素是否还在 DOM 中
-    const firstHighlight = highlights[0];
-    if (!firstHighlight || !firstHighlight.parentNode) {
-      return false;
-    }
-    
-    // 额外检查：元素是否还在文档中
     const iframe = getActiveIframe();
     if (!iframe) return false;
     
     try {
       const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-      return iframeDoc.contains(firstHighlight);
+      // 检查第一个匹配项的节点是否还在 DOM 中
+      const firstMatch = matchRects[0];
+      return firstMatch.node && firstMatch.node.parentNode && iframeDoc.contains(firstMatch.node);
     } catch (e) {
       return false;
     }
@@ -1195,16 +1363,16 @@ function showPageSearch() {
   function nextMatch() {
     if (!lastQuery) return;
     
-    // 检查高亮是否还有效，无效则重新搜索
-    if (!checkHighlightsValid()) {
+    // 检查匹配是否还有效，无效则重新搜索
+    if (!checkMatchesValid()) {
       log('🔄 页面已变化，重新搜索...');
       searchAndHighlight(lastQuery);
       return;
     }
     
-    if (highlights.length === 0) return;
-    currentIndex = (currentIndex + 1) % highlights.length;
-    updateCurrentHighlight();
+    if (matchRects.length === 0) return;
+    currentIndex = (currentIndex + 1) % matchRects.length;
+    updateHighlightPositions();
     scrollToCurrentHighlight();
     updateCount();
   }
@@ -1213,35 +1381,33 @@ function showPageSearch() {
   function prevMatch() {
     if (!lastQuery) return;
     
-    // 检查高亮是否还有效，无效则重新搜索
-    if (!checkHighlightsValid()) {
+    // 检查匹配是否还有效，无效则重新搜索
+    if (!checkMatchesValid()) {
       log('🔄 页面已变化，重新搜索...');
       searchAndHighlight(lastQuery);
       return;
     }
     
-    if (highlights.length === 0) return;
-    currentIndex = (currentIndex - 1 + highlights.length) % highlights.length;
-    updateCurrentHighlight();
+    if (matchRects.length === 0) return;
+    currentIndex = (currentIndex - 1 + matchRects.length) % matchRects.length;
+    updateHighlightPositions();
     scrollToCurrentHighlight();
     updateCount();
   }
   
   // 关闭搜索
   function closeSearch() {
-    // 移除 mousedown 监听器
-    if (mousedownHandler) {
-      try {
-        const iframe = getActiveIframe();
-        if (iframe && iframe.contentDocument) {
-          iframe.contentDocument.removeEventListener('mousedown', mousedownHandler, true);
-        }
-      } catch (e) {}
-      mousedownHandler = null;
-    }
+    // 移除滚动监听器
+    removeScrollListener();
+    
+    // 移除 DOM 变化监听器
+    removeMutationObserver();
     
     // 清除高亮
     clearHighlights();
+    
+    // 移除覆盖层
+    removeHighlightOverlay();
     
     // 移除搜索框
     if (pageSearchOverlay) {
@@ -1254,7 +1420,6 @@ function showPageSearch() {
   // 事件绑定
   let searchTimeout;
   input.addEventListener('input', () => {
-    injectHighlightStyles();
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(() => {
       searchAndHighlight(input.value);
@@ -1283,7 +1448,6 @@ function showPageSearch() {
   setTimeout(() => {
     if (selectedText) {
       input.value = selectedText;
-      injectHighlightStyles();
       searchAndHighlight(selectedText);
     }
     input.focus();
