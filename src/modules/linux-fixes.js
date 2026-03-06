@@ -231,174 +231,31 @@ function fixDownloadInDocument(doc, log, invoke) {
           const tauriInvoke = invoke || window.__TAURI__?.core?.invoke;
           
           if (tauriInvoke) {
-            // 使用 fetch + Tauri API 保存文件
-            log(`📥 [Linux Fix] 开始下载文件...`);
+            // 使用 Rust 端流式下载（避免 JS 端全量缓冲导致大文件卡死）
+            log(`📥 [Linux Fix] 使用 Rust 流式下载...`);
             
-            fetch(href, {
-              method: 'GET',
-              credentials: 'include',
-              headers: {
-                'Accept': '*/*'
-              }
-            })
-            .then(response => {
-              if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-              }
-              
-              // 提取文件名（优先级：Content-Disposition > download 属性 > URL）
-              let filename = download || 'download';
-              
-              // 从 Content-Disposition 头中提取文件名
-              const contentDisposition = response.headers.get('Content-Disposition');
-              if (contentDisposition) {
-                log(`📥 [Linux Fix] Content-Disposition: ${contentDisposition}`);
-                
-                // 匹配 filename= 或 filename*= 格式
-                const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/i);
-                if (filenameMatch) {
-                  let extractedFilename = filenameMatch[1];
-                  
-                  // 移除引号
-                  if ((extractedFilename.startsWith('"') && extractedFilename.endsWith('"')) ||
-                      (extractedFilename.startsWith("'") && extractedFilename.endsWith("'"))) {
-                    extractedFilename = extractedFilename.slice(1, -1);
-                  }
-                  
-                  // 处理 RFC 5987 格式 (filename*=UTF-8''...)
-                  if (extractedFilename.startsWith("UTF-8''") || extractedFilename.startsWith("utf-8''")) {
-                    extractedFilename = decodeURIComponent(extractedFilename.substring(7));
-                  } else {
-                    // 尝试解码 URL 编码
-                    try {
-                      extractedFilename = decodeURIComponent(extractedFilename);
-                    } catch (e) {
-                      // 如果解码失败，使用原始值
-                    }
-                  }
-                  
-                  if (extractedFilename) {
-                    filename = extractedFilename;
-                    log(`📥 [Linux Fix] 从 Content-Disposition 提取文件名: ${filename}`);
-                  }
-                }
-              }
-              
-              // 如果还没有文件名，从 URL 中提取
-              if (!filename || filename === 'download') {
-                const urlPath = href.split('/').pop().split('?')[0];
-                if (urlPath) {
-                  try {
-                    filename = decodeURIComponent(urlPath);
-                    log(`📥 [Linux Fix] 从 URL 提取文件名: ${filename}`);
-                  } catch (e) {
-                    filename = urlPath;
-                    log(`📥 [Linux Fix] 从 URL 提取文件名（未解码）: ${filename}`);
-                  }
-                }
-              }
-              
-              // 获取 Content-Type
-              const contentType = response.headers.get('Content-Type') || '';
-              log(`📥 [Linux Fix] Content-Type: ${contentType}`);
-              
-              // 检查文件名是否有有效的扩展名
-              const filenameParts = filename.split('.');
-              const hasValidExtension = filenameParts.length > 1 && 
-                                       filenameParts[filenameParts.length - 1].length > 0 && 
-                                       filenameParts[filenameParts.length - 1].length <= 10; // 扩展名通常不超过10个字符
-              
-              log(`📥 [Linux Fix] 文件名检查: "${filename}", 是否有扩展名: ${hasValidExtension}`);
-              
-              // 如果文件名没有有效的扩展名，根据 Content-Type 添加
-              if (!hasValidExtension && contentType) {
-                log(`📥 [Linux Fix] 文件名没有扩展名，根据 Content-Type 添加扩展名...`);
-                let ext = '';
-                const contentTypeLower = contentType.toLowerCase();
-                
-                // Excel 文件类型检测（优先级从高到低）
-                if (contentTypeLower.includes('vnd.openxmlformats-officedocument.spreadsheetml.sheet')) {
-                  // 明确的 .xlsx 格式
-                  ext = '.xlsx';
-                } else if (contentTypeLower === 'application/vnd.ms-excel' || 
-                          (contentTypeLower.includes('vnd.ms-excel') && !contentTypeLower.includes('openxml'))) {
-                  // application/vnd.ms-excel 可能是 .xls 或 .xlsx
-                  // 根据文件大小和常见情况，优先使用 .xlsx（现代格式更常见）
-                  // 但也可以根据实际情况调整为 .xls
-                  ext = '.xlsx'; // 现代 Excel 文件更常见，使用 .xlsx
-                  log(`📥 [Linux Fix] 检测到 application/vnd.ms-excel，使用 .xlsx 扩展名`);
-                } else if (contentTypeLower.includes('excel') || contentTypeLower.includes('spreadsheet')) {
-                  ext = '.xlsx'; // 默认使用新格式
-                } else if (contentTypeLower.includes('csv') || contentTypeLower.includes('text/csv')) {
-                  ext = '.csv';
-                } else if (contentTypeLower.includes('pdf') || contentTypeLower.includes('application/pdf')) {
-                  ext = '.pdf';
-                } else if (contentTypeLower.includes('zip') || contentTypeLower.includes('application/zip')) {
-                  ext = '.zip';
-                } else if (contentTypeLower.includes('rar') || contentTypeLower.includes('application/x-rar')) {
-                  ext = '.rar';
-                } else if (contentTypeLower.includes('json') || contentTypeLower.includes('application/json')) {
-                  ext = '.json';
-                } else if (contentTypeLower.includes('xml') || contentTypeLower.includes('application/xml')) {
-                  ext = '.xml';
-                } else if (contentTypeLower.includes('text/plain')) {
-                  ext = '.txt';
-                }
-                
-                if (ext) {
-                  // 如果文件名以点结尾，直接替换；否则添加扩展名
-                  if (filename.endsWith('.')) {
-                    filename = filename.slice(0, -1) + ext;
-                  } else {
-                    filename = filename + ext;
-                  }
-                  log(`📥 [Linux Fix] 根据 Content-Type 添加扩展名: ${filename}`);
-                }
-              }
-              
-              // 如果还是没有文件名，使用默认名称
-              if (!filename || filename === 'download') {
-                const contentTypeLower = (contentType || '').toLowerCase();
-                let ext = '.bin';
-                if (contentTypeLower.includes('vnd.openxmlformats-officedocument.spreadsheetml.sheet') ||
-                    contentTypeLower.includes('excel') || contentTypeLower.includes('spreadsheet')) {
-                  ext = '.xlsx';
-                } else if (contentTypeLower.includes('csv')) {
-                  ext = '.csv';
-                } else if (contentTypeLower.includes('pdf')) {
-                  ext = '.pdf';
-                } else if (contentTypeLower.includes('zip')) {
-                  ext = '.zip';
-                }
-                filename = `download${ext}`;
-                log(`📥 [Linux Fix] 使用默认文件名: ${filename}`);
-              }
-              
-              log(`📥 [Linux Fix] 最终文件名: ${filename}`);
-              
-              // 获取文件内容
-              return response.arrayBuffer().then(arrayBuffer => {
-                return { arrayBuffer, filename };
-              });
-            })
-            .then(({ arrayBuffer, filename }) => {
-              log(`📥 [Linux Fix] ✓ 文件已获取，大小: ${arrayBuffer.byteLength} bytes`);
-              
-              // 转换为 Uint8Array
-              const bytes = new Uint8Array(arrayBuffer);
-              
-              // 调用 Tauri API 保存文件
-              return tauriInvoke('save_file_to_downloads', {
-                filename: filename,
-                data: Array.from(bytes)
-              });
+            // 收集 cookie 传给 Rust（httponly cookie 无法获取，但大多数场景够用）
+            let cookies = '';
+            try { cookies = ownerDoc.cookie || ''; } catch (e) { /* cross-origin */ }
+            if (!cookies) {
+              try { cookies = document.cookie || ''; } catch (e) { /* fallback */ }
+            }
+            
+            const reqHeaders = { 'Accept': '*/*' };
+            if (cookies) {
+              reqHeaders['Cookie'] = cookies;
+            }
+            
+            tauriInvoke('download_file', {
+              url: href,
+              filename: download || null,
+              headers: reqHeaders,
             })
             .then(savedPath => {
               log(`📥 [Linux Fix] ✅ 文件已保存到: ${savedPath}`);
             })
             .catch(err => {
-              log(`❌ [Linux Fix] 下载失败: ${err.message}`);
-              log(`❌ [Linux Fix] 错误详情: ${err.stack || err}`);
+              log(`❌ [Linux Fix] Rust 下载失败: ${err}`);
               
               // 备用方案：尝试 window.open
               log(`📥 [Linux Fix] 尝试使用 window.open 作为备用...`);

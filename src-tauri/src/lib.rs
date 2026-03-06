@@ -1,5 +1,6 @@
+use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::{Builder, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Builder, Emitter, WebviewUrl, WebviewWindowBuilder};
 use tokio::sync::Mutex;
 
 mod crypto;
@@ -205,6 +206,308 @@ async fn save_file_to_downloads(filename: String, data: Vec<u8>) -> Result<Strin
     log!("📥 文件已保存: {}", saved_path);
     
     Ok(saved_path)
+}
+
+// ── 流式下载（解决大文件卡死问题） ─────────────────────────────
+
+#[derive(Clone, serde::Serialize)]
+struct DownloadProgress {
+    id: String,
+    filename: String,
+    downloaded: u64,
+    total_size: u64,
+    percent: u8,
+    speed_bps: f64,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct DownloadComplete {
+    id: String,
+    filename: String,
+    path: String,
+    size: u64,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct DownloadError {
+    id: String,
+    filename: String,
+    error: String,
+}
+
+/// 流式下载文件到下载目录（替代 JS 端全量缓冲方案）
+#[tauri::command]
+async fn download_file(
+    app: tauri::AppHandle,
+    url: String,
+    filename: Option<String>,
+    headers: Option<HashMap<String, String>>,
+) -> Result<String, String> {
+    use futures_util::StreamExt;
+    use std::time::Instant;
+    use tokio::io::AsyncWriteExt;
+
+    let download_id = uuid::Uuid::new_v4().to_string();
+    log!("📥 [Download] 开始: {} (id={})", url, download_id);
+
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 TauriApp/1.0")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let mut req = client.get(&url);
+    if let Some(ref h) = headers {
+        for (k, v) in h {
+            req = req.header(k.as_str(), v.as_str());
+        }
+    }
+
+    let resp = req.send().await.map_err(|e| {
+        let msg = format!("请求失败: {}", e);
+        let _ = app.emit("download-error", DownloadError {
+            id: download_id.clone(),
+            filename: filename.clone().unwrap_or_default(),
+            error: msg.clone(),
+        });
+        msg
+    })?;
+
+    if !resp.status().is_success() {
+        let msg = format!("HTTP {}", resp.status());
+        let _ = app.emit("download-error", DownloadError {
+            id: download_id.clone(),
+            filename: filename.clone().unwrap_or_default(),
+            error: msg.clone(),
+        });
+        return Err(msg);
+    }
+
+    let total_size = resp.content_length().unwrap_or(0);
+    let final_filename = parse_download_filename(&resp, filename.as_deref(), &url);
+
+    log!("📥 [Download] 文件名={}, 预估大小={} bytes", final_filename, total_size);
+
+    // 发送初始进度（0%），让前端立即显示下载项
+    let _ = app.emit("download-progress", DownloadProgress {
+        id: download_id.clone(),
+        filename: final_filename.clone(),
+        downloaded: 0,
+        total_size,
+        percent: 0,
+        speed_bps: 0.0,
+    });
+
+    let download_dir = get_download_dir_path()?;
+    if !download_dir.exists() {
+        std::fs::create_dir_all(&download_dir)
+            .map_err(|e| format!("创建下载目录失败: {}", e))?;
+    }
+    let save_path = resolve_unique_path(&download_dir, &final_filename);
+
+    let mut file = tokio::fs::File::create(&save_path)
+        .await
+        .map_err(|e| format!("创建文件失败: {}", e))?;
+
+    let mut stream = resp.bytes_stream();
+    let mut downloaded: u64 = 0;
+    let start_time = Instant::now();
+    let mut last_emit = Instant::now();
+
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result.map_err(|e| format!("读取数据失败: {}", e))?;
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| format!("写入文件失败: {}", e))?;
+        downloaded += chunk.len() as u64;
+
+        // 每 200ms 推送一次进度，避免事件风暴
+        if last_emit.elapsed().as_millis() >= 200 {
+            let percent = if total_size > 0 {
+                ((downloaded as f64 / total_size as f64) * 100.0).min(100.0) as u8
+            } else {
+                0
+            };
+            let elapsed = start_time.elapsed().as_secs_f64();
+            let speed = if elapsed > 0.0 { downloaded as f64 / elapsed } else { 0.0 };
+
+            let _ = app.emit("download-progress", DownloadProgress {
+                id: download_id.clone(),
+                filename: final_filename.clone(),
+                downloaded,
+                total_size,
+                percent,
+                speed_bps: speed,
+            });
+            last_emit = Instant::now();
+        }
+    }
+
+    file.flush().await.map_err(|e| format!("flush 失败: {}", e))?;
+
+    let saved_path = save_path.to_string_lossy().to_string();
+    log!("📥 [Download] ✅ 完成: {} ({} bytes)", saved_path, downloaded);
+
+    let _ = app.emit("download-complete", DownloadComplete {
+        id: download_id,
+        filename: final_filename,
+        path: saved_path.clone(),
+        size: downloaded,
+    });
+
+    Ok(saved_path)
+}
+
+fn get_download_dir_path() -> Result<std::path::PathBuf, String> {
+    dirs::download_dir()
+        .or_else(|| {
+            dirs::home_dir().map(|h| {
+                let en = h.join("Downloads");
+                if en.exists() { return en; }
+                let zh = h.join("下载");
+                if zh.exists() { return zh; }
+                en
+            })
+        })
+        .ok_or_else(|| "无法获取下载目录".to_string())
+}
+
+fn resolve_unique_path(dir: &std::path::Path, filename: &str) -> std::path::PathBuf {
+    let mut path = dir.join(filename);
+    let mut counter = 1u32;
+    while path.exists() {
+        let stem = std::path::Path::new(filename)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("file");
+        let ext = std::path::Path::new(filename)
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        let new_name = if ext.is_empty() {
+            format!("{} ({})", stem, counter)
+        } else {
+            format!("{} ({}).{}", stem, counter, ext)
+        };
+        path = dir.join(new_name);
+        counter += 1;
+    }
+    path
+}
+
+fn parse_download_filename(resp: &reqwest::Response, hint: Option<&str>, url: &str) -> String {
+    // 1. Content-Disposition
+    if let Some(cd) = resp.headers().get("content-disposition") {
+        if let Ok(cd_str) = cd.to_str() {
+            if let Some(name) = extract_filename_from_cd(cd_str) {
+                return name;
+            }
+        }
+    }
+    // 2. JS 端提供的 filename hint
+    if let Some(h) = hint {
+        if !h.is_empty() && h != "download" {
+            return add_extension_if_needed(h, resp);
+        }
+    }
+    // 3. 从 URL 路径提取
+    if let Some(segment) = url.split('?').next().and_then(|u| u.split('/').last()) {
+        if let Ok(decoded) = urlencoding::decode(segment) {
+            let name = decoded.to_string();
+            if !name.is_empty() && name != "/" {
+                return add_extension_if_needed(&name, resp);
+            }
+        }
+    }
+    // 4. 兜底
+    let ext = guess_extension_from_response(resp);
+    format!("download{}", ext)
+}
+
+fn add_extension_if_needed(name: &str, resp: &reqwest::Response) -> String {
+    let has_ext = std::path::Path::new(name)
+        .extension()
+        .map(|e| {
+            let s = e.to_string_lossy();
+            !s.is_empty() && s.len() <= 10
+        })
+        .unwrap_or(false);
+    if has_ext {
+        return name.to_string();
+    }
+    let ext = guess_extension_from_response(resp);
+    format!("{}{}", name.trim_end_matches('.'), ext)
+}
+
+fn extract_filename_from_cd(cd: &str) -> Option<String> {
+    // filename*= (RFC 5987)
+    if let Some(pos) = cd.find("filename*=") {
+        let rest = &cd[pos + 10..];
+        let value = rest.split(';').next().unwrap_or("").trim();
+        let encoded = value
+            .strip_prefix("UTF-8''")
+            .or_else(|| value.strip_prefix("utf-8''"));
+        if let Some(encoded) = encoded {
+            if let Ok(decoded) = urlencoding::decode(encoded) {
+                let name = decoded.to_string();
+                if !name.is_empty() {
+                    return Some(name);
+                }
+            }
+        }
+    }
+    // filename=
+    if let Some(pos) = cd.find("filename=") {
+        let rest = &cd[pos + 9..];
+        let value = rest.split(';').next().unwrap_or("").trim();
+        let unquoted = value.trim_matches('"').trim_matches('\'');
+        if let Ok(decoded) = urlencoding::decode(unquoted) {
+            let name = decoded.to_string();
+            if !name.is_empty() {
+                return Some(name);
+            }
+        } else if !unquoted.is_empty() {
+            return Some(unquoted.to_string());
+        }
+    }
+    None
+}
+
+fn guess_extension_from_response(resp: &reqwest::Response) -> &'static str {
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_lowercase();
+    guess_extension(&ct)
+}
+
+fn guess_extension(ct: &str) -> &'static str {
+    if ct.contains("spreadsheetml") || ct.contains("excel") || ct.contains("spreadsheet") {
+        ".xlsx"
+    } else if ct.contains("vnd.ms-excel") {
+        ".xlsx"
+    } else if ct.contains("csv") {
+        ".csv"
+    } else if ct.contains("pdf") {
+        ".pdf"
+    } else if ct.contains("zip") {
+        ".zip"
+    } else if ct.contains("rar") {
+        ".rar"
+    } else if ct.contains("json") {
+        ".json"
+    } else if ct.contains("xml") {
+        ".xml"
+    } else if ct.contains("text/plain") {
+        ".txt"
+    } else if ct.contains("msword") || ct.contains("wordprocessingml") {
+        ".docx"
+    } else if ct.contains("presentationml") || ct.contains("powerpoint") {
+        ".pptx"
+    } else {
+        ".bin"
+    }
 }
 
 /// 设置页面缩放（使用 Tauri 2.0 WebView 原生缩放）
@@ -432,7 +735,8 @@ pub fn run() {
             create_new_window,
             get_download_dir,
             get_os_type,
-            save_file_to_downloads
+            save_file_to_downloads,
+            download_file
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
