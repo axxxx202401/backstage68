@@ -357,6 +357,34 @@ async fn download_file(
     Ok(saved_path)
 }
 
+/// 用系统默认程序打开文件
+#[tauri::command]
+async fn open_file(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        return Err(format!("文件不存在: {}", path));
+    }
+    open::that(&path).map_err(|e| format!("打开文件失败: {}", e))
+}
+
+/// 用系统文件管理器打开文件所在目录（并选中该文件）
+#[tauri::command]
+async fn open_file_folder(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    let dir = if p.is_dir() {
+        p.to_path_buf()
+    } else {
+        p.parent()
+            .map(|d| d.to_path_buf())
+            .ok_or_else(|| format!("无法获取父目录: {}", path))?
+    };
+    if !dir.exists() {
+        return Err(format!("目录不存在: {}", dir.display()));
+    }
+    open::that(dir.to_string_lossy().as_ref())
+        .map_err(|e| format!("打开目录失败: {}", e))
+}
+
 fn get_download_dir_path() -> Result<std::path::PathBuf, String> {
     dirs::download_dir()
         .or_else(|| {
@@ -736,7 +764,9 @@ pub fn run() {
             get_download_dir,
             get_os_type,
             save_file_to_downloads,
-            download_file
+            download_file,
+            open_file,
+            open_file_folder
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

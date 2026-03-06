@@ -40,8 +40,7 @@ export async function initDownload(log, invoke) {
       },
       showDownloadComplete(id, filename, savedPath) {
         ensureProgressContainer();
-        updateDownloadItem(id, filename, 0, 0, 100, 0, 'complete');
-        setTimeout(() => removeDownloadItem(id), 5000);
+        updateDownloadItem(id, filename, 0, 0, 100, 0, 'complete', null, savedPath);
       },
       showDownloadError(id, filename, error) {
         ensureProgressContainer();
@@ -98,9 +97,8 @@ function initDownloadProgressListener(log) {
   tauriListen('download-complete', (event) => {
     const { id, filename, path, size } = event.payload;
     ensureProgressContainer();
-    updateDownloadItem(id, filename, size, size, 100, 0, 'complete');
+    updateDownloadItem(id, filename, size, size, 100, 0, 'complete', null, path);
     log(`📥 下载完成: ${path}`);
-    setTimeout(() => removeDownloadItem(id), 5000);
   });
 
   tauriListen('download-error', (event) => {
@@ -137,22 +135,23 @@ function ensureProgressContainer() {
   document.body.appendChild(progressContainer);
 }
 
-function updateDownloadItem(id, filename, downloaded, totalSize, percent, speedBps, status, errorMsg) {
+function updateDownloadItem(id, filename, downloaded, totalSize, percent, speedBps, status, errorMsg, savedPath) {
   let item = activeDownloads.get(id);
 
   if (!item) {
     item = createDownloadItemEl(id, filename);
     activeDownloads.set(id, item);
     progressContainer.appendChild(item.el);
-    // 入场动画
     requestAnimationFrame(() => { item.el.style.opacity = '1'; item.el.style.transform = 'translateX(0)'; });
   }
+
+  if (savedPath) item.savedPath = savedPath;
 
   const bar = item.el.querySelector('.dl-bar-fill');
   const info = item.el.querySelector('.dl-info');
   const nameEl = item.el.querySelector('.dl-name');
+  const actions = item.el.querySelector('.dl-actions');
 
-  // 截短文件名
   const shortName = filename.length > 32 ? filename.slice(0, 14) + '...' + filename.slice(-14) : filename;
   nameEl.textContent = shortName;
   nameEl.title = filename;
@@ -160,19 +159,57 @@ function updateDownloadItem(id, filename, downloaded, totalSize, percent, speedB
   if (status === 'downloading') {
     bar.style.width = `${percent}%`;
     bar.style.backgroundColor = '#3b82f6';
-    const dlText = formatBytes(downloaded);
     const totalText = totalSize > 0 ? ` / ${formatBytes(totalSize)}` : '';
     const speedText = speedBps > 0 ? `  ${formatBytes(speedBps)}/s` : '';
     info.textContent = `${percent}%${totalText}${speedText}`;
+    info.style.display = '';
+    actions.style.display = 'none';
   } else if (status === 'complete') {
     bar.style.width = '100%';
     bar.style.backgroundColor = '#22c55e';
-    info.textContent = `✓ 完成  ${formatBytes(downloaded)}`;
+    info.style.display = 'none';
+    actions.style.display = 'flex';
+    actions.innerHTML = '';
+    actions.appendChild(makeActionBtn('打开文件', () => {
+      const invoke = window.__TAURI__?.core?.invoke;
+      if (invoke && item.savedPath) invoke('open_file', { path: item.savedPath }).catch(console.error);
+    }));
+    actions.appendChild(makeActionBtn('打开目录', () => {
+      const invoke = window.__TAURI__?.core?.invoke;
+      if (invoke && item.savedPath) invoke('open_file_folder', { path: item.savedPath }).catch(console.error);
+    }));
+    actions.appendChild(makeActionBtn(`✓ ${formatBytes(downloaded)}`, null, true));
   } else if (status === 'error') {
     bar.style.width = '100%';
     bar.style.backgroundColor = '#ef4444';
     info.textContent = `✗ ${errorMsg || '下载失败'}`;
+    info.style.display = '';
+    actions.style.display = 'none';
   }
+}
+
+const ACTION_BTN_STYLE = `
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.4;
+  border: none;
+  transition: background .15s;
+`;
+
+function makeActionBtn(text, onClick, isLabel) {
+  const btn = document.createElement(isLabel ? 'span' : 'button');
+  if (isLabel) {
+    btn.style.cssText = `font-size:11px;color:#94a3b8;margin-left:auto;`;
+  } else {
+    btn.style.cssText = ACTION_BTN_STYLE + `background:#334155;color:#e2e8f0;`;
+    btn.addEventListener('mouseenter', () => { btn.style.background = '#475569'; });
+    btn.addEventListener('mouseleave', () => { btn.style.background = '#334155'; });
+    btn.addEventListener('click', onClick);
+  }
+  btn.textContent = text;
+  return btn;
 }
 
 function createDownloadItemEl(id, filename) {
@@ -197,9 +234,10 @@ function createDownloadItemEl(id, filename) {
       <div class="dl-bar-fill" style="height:100%;width:0%;border-radius:4px;transition:width .2s ease;background:#3b82f6;"></div>
     </div>
     <div class="dl-info" style="font-size:11px;color:#94a3b8;"></div>
+    <div class="dl-actions" style="display:none;gap:6px;align-items:center;margin-top:2px;"></div>
   `;
   el.querySelector('.dl-close').addEventListener('click', () => removeDownloadItem(id));
-  return { el };
+  return { el, savedPath: null };
 }
 
 function removeDownloadItem(id) {
