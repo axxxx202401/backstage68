@@ -246,6 +246,15 @@ function fixDownloadInDocument(doc, log, invoke) {
               reqHeaders['Cookie'] = cookies;
             }
             
+            // 生成本地 ID 用于 UI 追踪
+            const localId = 'dl-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+            const displayName = download || href.split('/').pop()?.split('?')[0] || 'download';
+            
+            // 立即显示下载开始的 UI 反馈（不依赖事件）
+            if (window.tauriDownload?.showDownloadStarted) {
+              window.tauriDownload.showDownloadStarted(localId, displayName);
+            }
+            
             tauriInvoke('download_file', {
               url: href,
               filename: download || null,
@@ -253,9 +262,17 @@ function fixDownloadInDocument(doc, log, invoke) {
             })
             .then(savedPath => {
               log(`📥 [Linux Fix] ✅ 文件已保存到: ${savedPath}`);
+              // 显示完成状态（如果 Rust 事件没有更新的话，这里兜底）
+              if (window.tauriDownload?.showDownloadComplete) {
+                window.tauriDownload.showDownloadComplete(localId, displayName, savedPath);
+              }
             })
             .catch(err => {
               log(`❌ [Linux Fix] Rust 下载失败: ${err}`);
+              // 显示失败状态
+              if (window.tauriDownload?.showDownloadError) {
+                window.tauriDownload.showDownloadError(localId, displayName, String(err));
+              }
               
               // 备用方案：尝试 window.open
               log(`📥 [Linux Fix] 尝试使用 window.open 作为备用...`);

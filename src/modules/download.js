@@ -32,7 +32,22 @@ export async function initDownload(log, invoke) {
       getDownloadDir: () => downloadDir,
       getOsType: () => osType,
       isLinux: () => osType === 'linux',
-      openDownloadDir
+      openDownloadDir,
+      // 供 linux-fixes.js 直接调用的 UI 控制函数
+      showDownloadStarted(id, filename) {
+        ensureProgressContainer();
+        updateDownloadItem(id, filename, 0, 0, 0, 0, 'downloading');
+      },
+      showDownloadComplete(id, filename, savedPath) {
+        ensureProgressContainer();
+        updateDownloadItem(id, filename, 0, 0, 100, 0, 'complete');
+        setTimeout(() => removeDownloadItem(id), 5000);
+      },
+      showDownloadError(id, filename, error) {
+        ensureProgressContainer();
+        updateDownloadItem(id, filename, 0, 0, 0, 0, 'error', error);
+        setTimeout(() => removeDownloadItem(id), 8000);
+      },
     };
 
     if (osType === 'linux') {
@@ -50,31 +65,45 @@ export async function initDownload(log, invoke) {
 }
 
 /**
- * 监听 Rust 端下载事件，驱动进度 UI
+ * 监听 Rust 端下载事件，驱动实时进度 UI
+ * 注意：外部 URL 模式下 window.__TAURI__.event 不存在，
+ * 需要用底层 __TAURI_INTERNALS__ API 注册事件监听
  */
 function initDownloadProgressListener(log) {
-  const listen = window.__TAURI__?.event?.listen;
-  if (!listen) {
-    log('⚠️ Tauri event API 不可用，下载进度 UI 将不可用');
+  const internals = window.__TAURI_INTERNALS__;
+  if (!internals || !internals.invoke || !internals.transformCallback) {
+    log('⚠️ Tauri internals API 不可用，实时进度将不可用（基础反馈仍然可用）');
     return;
   }
 
-  listen('download-progress', (event) => {
+  function tauriListen(eventName, handler) {
+    const callbackId = internals.transformCallback((event) => {
+      handler(event);
+    });
+    return internals.invoke('plugin:event|listen', {
+      event: eventName,
+      target: { kind: 'Any' },
+      handler: callbackId,
+    }).catch(err => {
+      log(`⚠️ 注册事件 ${eventName} 失败: ${err}`);
+    });
+  }
+
+  tauriListen('download-progress', (event) => {
     const { id, filename, downloaded, total_size, percent, speed_bps } = event.payload;
     ensureProgressContainer();
     updateDownloadItem(id, filename, downloaded, total_size, percent, speed_bps, 'downloading');
   });
 
-  listen('download-complete', (event) => {
+  tauriListen('download-complete', (event) => {
     const { id, filename, path, size } = event.payload;
     ensureProgressContainer();
     updateDownloadItem(id, filename, size, size, 100, 0, 'complete');
     log(`📥 下载完成: ${path}`);
-    // 5 秒后自动移除完成项
     setTimeout(() => removeDownloadItem(id), 5000);
   });
 
-  listen('download-error', (event) => {
+  tauriListen('download-error', (event) => {
     const { id, filename, error } = event.payload;
     ensureProgressContainer();
     updateDownloadItem(id, filename, 0, 0, 0, 0, 'error', error);
@@ -82,7 +111,7 @@ function initDownloadProgressListener(log) {
     setTimeout(() => removeDownloadItem(id), 8000);
   });
 
-  log('✅ 下载进度监听已启用');
+  log('✅ 下载进度事件监听已启用');
 }
 
 // ── 进度 UI ──────────────────────────────────────
