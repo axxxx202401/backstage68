@@ -235,6 +235,13 @@ struct DownloadError {
     error: String,
 }
 
+#[derive(Clone, serde::Serialize)]
+struct DownloadResult {
+    path: String,
+    size: u64,
+    id: String,
+}
+
 /// 流式下载文件到下载目录（替代 JS 端全量缓冲方案）
 #[tauri::command]
 async fn download_file(
@@ -242,12 +249,13 @@ async fn download_file(
     url: String,
     filename: Option<String>,
     headers: Option<HashMap<String, String>>,
-) -> Result<String, String> {
+    id: Option<String>,
+) -> Result<DownloadResult, String> {
     use futures_util::StreamExt;
     use std::time::Instant;
     use tokio::io::AsyncWriteExt;
 
-    let download_id = uuid::Uuid::new_v4().to_string();
+    let download_id = id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     log!("📥 [Download] 开始: {} (id={})", url, download_id);
 
     let client = reqwest::Client::builder()
@@ -348,13 +356,17 @@ async fn download_file(
     log!("📥 [Download] ✅ 完成: {} ({} bytes)", saved_path, downloaded);
 
     let _ = app.emit("download-complete", DownloadComplete {
-        id: download_id,
+        id: download_id.clone(),
         filename: final_filename,
         path: saved_path.clone(),
         size: downloaded,
     });
 
-    Ok(saved_path)
+    Ok(DownloadResult {
+        path: saved_path,
+        size: downloaded,
+        id: download_id,
+    })
 }
 
 /// 用系统默认程序打开文件

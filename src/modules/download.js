@@ -38,9 +38,9 @@ export async function initDownload(log, invoke) {
         ensureProgressContainer();
         updateDownloadItem(id, filename, 0, 0, 0, 0, 'downloading');
       },
-      showDownloadComplete(id, filename, savedPath) {
+      showDownloadComplete(id, filename, savedPath, size) {
         ensureProgressContainer();
-        updateDownloadItem(id, filename, 0, 0, 100, 0, 'complete', null, savedPath);
+        updateDownloadItem(id, filename, size || 0, size || 0, 100, 0, 'complete', null, savedPath);
       },
       showDownloadError(id, filename, error) {
         ensureProgressContainer();
@@ -178,7 +178,11 @@ function updateDownloadItem(id, filename, downloaded, totalSize, percent, speedB
       const invoke = window.__TAURI__?.core?.invoke;
       if (invoke && item.savedPath) invoke('open_file_folder', { path: item.savedPath }).catch(console.error);
     }));
-    actions.appendChild(makeActionBtn(`✓ ${formatBytes(downloaded)}`, null, true));
+    const sizeText = downloaded > 0 ? formatBytes(downloaded) : '完成';
+    actions.appendChild(makeActionBtn(`✓ ${sizeText}`, null, true));
+    // 30 秒后自动消失（给用户足够时间点击按钮）
+    clearTimeout(item.dismissTimer);
+    item.dismissTimer = setTimeout(() => removeDownloadItem(id), 30000);
   } else if (status === 'error') {
     bar.style.width = '100%';
     bar.style.backgroundColor = '#ef4444';
@@ -243,12 +247,12 @@ function createDownloadItemEl(id, filename) {
 function removeDownloadItem(id) {
   const item = activeDownloads.get(id);
   if (!item) return;
+  clearTimeout(item.dismissTimer);
   item.el.style.opacity = '0';
   item.el.style.transform = 'translateX(40px)';
   setTimeout(() => {
     item.el.remove();
     activeDownloads.delete(id);
-    // 如果没有活动下载了，移除容器
     if (activeDownloads.size === 0 && progressContainer) {
       progressContainer.remove();
       progressContainer = null;

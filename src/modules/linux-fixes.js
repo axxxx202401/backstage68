@@ -246,11 +246,12 @@ function fixDownloadInDocument(doc, log, invoke) {
               reqHeaders['Cookie'] = cookies;
             }
             
-            // 生成本地 ID 用于 UI 追踪
+            // 生成本地 ID，传给 Rust 统一追踪（事件进度和完成状态共用同一张卡片）
             const localId = 'dl-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-            const displayName = download || href.split('/').pop()?.split('?')[0] || 'download';
+            let displayName = download || href.split('/').pop()?.split('?')[0] || 'download';
+            try { displayName = decodeURIComponent(displayName); } catch (e) { /* keep as-is */ }
             
-            // 立即显示下载开始的 UI 反馈（不依赖事件）
+            // 立即显示下载开始的 UI 反馈
             if (window.tauriDownload?.showDownloadStarted) {
               window.tauriDownload.showDownloadStarted(localId, displayName);
             }
@@ -259,17 +260,19 @@ function fixDownloadInDocument(doc, log, invoke) {
               url: href,
               filename: download || null,
               headers: reqHeaders,
+              id: localId,
             })
-            .then(savedPath => {
-              log(`📥 [Linux Fix] ✅ 文件已保存到: ${savedPath}`);
-              // 显示完成状态（如果 Rust 事件没有更新的话，这里兜底）
+            .then(result => {
+              // result = { path, size, id }
+              const savedPath = typeof result === 'string' ? result : result.path;
+              const fileSize = typeof result === 'object' ? result.size : 0;
+              log(`📥 [Linux Fix] ✅ 文件已保存到: ${savedPath} (${fileSize} bytes)`);
               if (window.tauriDownload?.showDownloadComplete) {
-                window.tauriDownload.showDownloadComplete(localId, displayName, savedPath);
+                window.tauriDownload.showDownloadComplete(localId, displayName, savedPath, fileSize);
               }
             })
             .catch(err => {
               log(`❌ [Linux Fix] Rust 下载失败: ${err}`);
-              // 显示失败状态
               if (window.tauriDownload?.showDownloadError) {
                 window.tauriDownload.showDownloadError(localId, displayName, String(err));
               }
