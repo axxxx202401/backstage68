@@ -3,7 +3,7 @@
  */
 
 const TAB_CONFIG = {
-  maxTabs: 20,
+  maxTabs: 30,
   tabBarHeight: 40,
   minTabWidth: 40,
   maxTabWidth: 200,
