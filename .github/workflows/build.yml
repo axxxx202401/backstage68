@@ -180,9 +180,9 @@ jobs:
             echo "TAURI_ENV_NAME=生产环境" >> $GITHUB_ENV
             echo "TAURI_ENV_KEY=prod" >> $GITHUB_ENV
             echo "TAURI_ENV_URL=https://b12e88-gg-ooxx.8cmanage.com/" >> $GITHUB_ENV
-            echo "TAURI_DEVTOOLS_ENABLED=false" >> $GITHUB_ENV
+            echo "TAURI_DEVTOOLS_ENABLED=true" >> $GITHUB_ENV
             echo "TAURI_DEVTOOLS_AUTO_OPEN=false" >> $GITHUB_ENV
-            echo "TAURI_ENABLE_LOGS=false" >> $GITHUB_ENV
+            echo "TAURI_ENABLE_LOGS=true" >> $GITHUB_ENV
             echo "TAURI_PRODUCT_NAME=Backstage68" >> $GITHUB_ENV
             echo "TAURI_BUNDLE_IDENTIFIER=com.backstage68.app" >> $GITHUB_ENV
           fi
