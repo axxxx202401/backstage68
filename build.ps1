@@ -1,4 +1,4 @@
-﻿param(
+param(
     [Parameter(Mandatory=$true)]
     [ValidateSet("test","uat","prod")]
     [string]$Environment,
@@ -225,7 +225,13 @@ try {
 
     Write-Host ""
     Write-Section "[BUILD] Running npm run tauri build..." "Yellow"
-    npm run tauri build
+    # TAURI_DEVTOOLS_ENABLED=true 时必须带上 devtools feature，否则 release 无法打开 WebView 控制台
+    if ($envMap["TAURI_DEVTOOLS_ENABLED"] -eq "true") {
+        Write-Host "   [INFO] Extra args: --features devtools" -ForegroundColor DarkGray
+        npm run tauri build -- --features devtools
+    } else {
+        npm run tauri build
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Section "[FAIL] Build failed" "Red"
         exit $LASTEXITCODE

@@ -155,39 +155,30 @@ jobs:
         shell: bash
         run: |
           ENV="${{ steps.env.outputs.environment }}"
-          echo "🌍 Setting up environment: $ENV"
+          ENV_FILE=".env.${ENV}"
+          echo "🌍 Setting up environment: $ENV (from ${ENV_FILE})"
           
-          # 根据环境设置变量
-          if [ "$ENV" == "test" ]; then
-            echo "TAURI_ENV_NAME=测试环境" >> $GITHUB_ENV
-            echo "TAURI_ENV_KEY=test" >> $GITHUB_ENV
-            echo "TAURI_ENV_URL=https://test-otc.68chat.co/" >> $GITHUB_ENV
-            echo "TAURI_DEVTOOLS_ENABLED=true" >> $GITHUB_ENV
-            echo "TAURI_DEVTOOLS_AUTO_OPEN=false" >> $GITHUB_ENV
-            echo "TAURI_ENABLE_LOGS=true" >> $GITHUB_ENV
-            echo "TAURI_PRODUCT_NAME=Backstage68-Test" >> $GITHUB_ENV
-            echo "TAURI_BUNDLE_IDENTIFIER=com.backstage68.test" >> $GITHUB_ENV
-          elif [ "$ENV" == "uat" ]; then
-            echo "TAURI_ENV_NAME=预发布环境" >> $GITHUB_ENV
-            echo "TAURI_ENV_KEY=uat" >> $GITHUB_ENV
-            echo "TAURI_ENV_URL=https://stage-otc.68chat.co/" >> $GITHUB_ENV
-            echo "TAURI_DEVTOOLS_ENABLED=true" >> $GITHUB_ENV
-            echo "TAURI_DEVTOOLS_AUTO_OPEN=false" >> $GITHUB_ENV
-            echo "TAURI_ENABLE_LOGS=false" >> $GITHUB_ENV
-            echo "TAURI_PRODUCT_NAME=Backstage68-UAT" >> $GITHUB_ENV
-            echo "TAURI_BUNDLE_IDENTIFIER=com.backstage68.uat" >> $GITHUB_ENV
-          elif [ "$ENV" == "prod" ]; then
-            echo "TAURI_ENV_NAME=生产环境" >> $GITHUB_ENV
-            echo "TAURI_ENV_KEY=prod" >> $GITHUB_ENV
-            echo "TAURI_ENV_URL=https://b12e88-gg-ooxx.8cmanage.com/" >> $GITHUB_ENV
-            echo "TAURI_DEVTOOLS_ENABLED=true" >> $GITHUB_ENV
-            echo "TAURI_DEVTOOLS_AUTO_OPEN=false" >> $GITHUB_ENV
-            echo "TAURI_ENABLE_LOGS=true" >> $GITHUB_ENV
-            echo "TAURI_PRODUCT_NAME=Backstage68" >> $GITHUB_ENV
-            echo "TAURI_BUNDLE_IDENTIFIER=com.backstage68.app" >> $GITHUB_ENV
+          if [ ! -f "$ENV_FILE" ]; then
+            echo "❌ Missing ${ENV_FILE} — add it or adjust workflow." >&2
+            exit 1
           fi
           
-          echo "✅ Environment variables set for $ENV"
+          # 与本地 build.sh 一致：从仓库中的 .env.<环境> 注入编译期变量
+          while IFS= read -r line || [ -n "$line" ]; do
+            [[ "$line" =~ ^[[:space:]]*# ]] && continue
+            [[ -z "${line// }" ]] && continue
+            echo "$line" >> $GITHUB_ENV
+          done < "$ENV_FILE"
+          
+          # 写入 GITHUB_ENV 不会作用于当前 shell，需从文件解析
+          DT="$(grep '^TAURI_DEVTOOLS_ENABLED=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '\r' | xargs)"
+          if [ "$DT" = "true" ]; then
+            echo "TAURI_CARGO_ARGS=--features devtools" >> $GITHUB_ENV
+            echo "✅ TAURI_CARGO_ARGS=--features devtools (from TAURI_DEVTOOLS_ENABLED)"
+          else
+            echo "TAURI_CARGO_ARGS=" >> $GITHUB_ENV
+            echo "✅ TAURI_CARGO_ARGS empty (TAURI_DEVTOOLS_ENABLED=${DT:-unset})"
+          fi
 
       - name: Update tauri.conf.json
         shell: bash
@@ -231,8 +222,8 @@ jobs:
           releaseBody: ${{ github.ref_type == 'tag' && '🚀 Release build' || '' }}
           releaseDraft: true
           prerelease: ${{ steps.env.outputs.environment != 'prod' }}
-          # test/uat 环境启用 devtools feature，prod 环境不启用
-          args: --target ${{ matrix.platform.target }} ${{ steps.env.outputs.environment != 'prod' && '--features devtools' || '' }}
+          # 由 .env.<环境> 中的 TAURI_DEVTOOLS_ENABLED 决定是否传入 --features devtools
+          args: --target ${{ matrix.platform.target }} ${{ env.TAURI_CARGO_ARGS }}
 
       - name: Restore tauri.conf.json
         if: always()

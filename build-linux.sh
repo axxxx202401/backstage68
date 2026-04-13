@@ -368,8 +368,13 @@ else
     # 清理之前的构建
     rm -rf src-tauri/target/release/bundle/
     
-    # 构建
-    npm run tauri build
+    # TAURI_DEVTOOLS_ENABLED=true 时必须带上 devtools feature，否则 release 无法打开 WebView 控制台
+    if [ "$TAURI_DEVTOOLS_ENABLED" = "true" ]; then
+        echo -e "${YELLOW}🔧 构建参数: --features devtools${NC}"
+        npm run tauri build -- --features devtools
+    else
+        npm run tauri build
+    fi
     
     BUILD_STATUS=$?
     
