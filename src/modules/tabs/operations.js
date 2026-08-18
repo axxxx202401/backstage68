@@ -388,6 +388,9 @@ export function activateTab(id) {
   });
   
   window.tauriTabs.activeTabId = id;
+  window.dispatchEvent(new CustomEvent('tauri-tab-activated', {
+    detail: { tabId: id }
+  }));
   
   // 更新窗口标题
   if (tab.title) {

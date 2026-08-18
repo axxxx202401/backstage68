@@ -952,8 +952,13 @@ function showPageSearch() {
   let highlightOverlay = null;  // 高亮覆盖层
   let scrollHandler = null;
   let resizeHandler = null;
+  let scrollIframe = null;
   let mutationObserver = null;  // DOM 变化观察器
   let mutationTimeout = null;   // 防抖定时器
+  let pageChangeTimeout = null;
+  let observedIframe = null;
+  let iframeLoadHandler = null;
+  let tabActivatedHandler = null;
   
   // 获取当前活动的 iframe
   function getActiveIframe() {
@@ -1083,13 +1088,14 @@ function showPageSearch() {
     // 先清除旧的高亮
     clearHighlights();
     currentIndex = -1;
+    lastQuery = query;
     
     if (!query.trim()) {
       updateCount();
       return;
     }
     
-    lastQuery = query;
+    bindActiveIframeLoad();
     const iframe = getActiveIframe();
     if (!iframe) return;
     
@@ -1153,6 +1159,11 @@ function showPageSearch() {
       setupMutationObserver();
       
       updateCount();
+
+      // 首次搜索时将当前匹配项滚动到可视区域
+      if (matchRects.length > 0) {
+        scrollToCurrentHighlight();
+      }
       
     } catch (err) {
       log(`⚠️ 搜索失败: ${err.message}`);
@@ -1168,11 +1179,16 @@ function showPageSearch() {
       const iframeWin = iframe.contentWindow;
       
       // 移除旧的监听器
-      if (scrollHandler) {
-        iframeWin.removeEventListener('scroll', scrollHandler, true);
-      }
-      if (resizeHandler) {
-        iframeWin.removeEventListener('resize', resizeHandler);
+      if (scrollIframe) {
+        const oldIframeWin = scrollIframe.contentWindow;
+        const oldIframeDoc = scrollIframe.contentDocument || oldIframeWin.document;
+        if (scrollHandler) {
+          oldIframeWin.removeEventListener('scroll', scrollHandler, true);
+          oldIframeDoc.removeEventListener('scroll', scrollHandler, true);
+        }
+        if (resizeHandler) {
+          oldIframeWin.removeEventListener('resize', resizeHandler);
+        }
       }
       
       // 使用 requestAnimationFrame 优化滚动性能
@@ -1197,6 +1213,7 @@ function showPageSearch() {
       // 也监听 iframe 内部的滚动容器
       const iframeDoc = iframe.contentDocument || iframeWin.document;
       iframeDoc.addEventListener('scroll', scrollHandler, true);
+      scrollIframe = iframe;
       
     } catch (err) {
       log(`⚠️ 设置滚动监听器失败: ${err.message}`);
@@ -1205,7 +1222,7 @@ function showPageSearch() {
   
   // 移除滚动监听器
   function removeScrollListener() {
-    const iframe = getActiveIframe();
+    const iframe = scrollIframe;
     if (!iframe) return;
     
     try {
@@ -1221,6 +1238,7 @@ function showPageSearch() {
         iframeWin.removeEventListener('resize', resizeHandler);
         resizeHandler = null;
       }
+      scrollIframe = null;
     } catch (e) {}
   }
   
@@ -1262,9 +1280,7 @@ function showPageSearch() {
           });
           
           if (hasSignificantChange) {
-            log('🔄 检测到页面 DOM 变化，清除高亮');
-            clearHighlights();
-            updateCount();
+            schedulePageResearch(200);
           }
         }, 100);  // 100ms 防抖
       });
@@ -1293,6 +1309,74 @@ function showPageSearch() {
       mutationObserver = null;
     }
   }
+
+  // 页面内容或活动标签变化后，使用当前关键词重新搜索
+  function schedulePageResearch(delay = 200) {
+    if (pageChangeTimeout) {
+      clearTimeout(pageChangeTimeout);
+    }
+
+    if (!pageSearchOverlay || !lastQuery.trim()) return;
+
+    pageChangeTimeout = setTimeout(() => {
+      pageChangeTimeout = null;
+      if (!pageSearchOverlay || !lastQuery.trim()) return;
+
+      log('🔄 页面已变化，重新搜索当前关键词');
+      searchAndHighlight(lastQuery);
+    }, delay);
+  }
+
+  // 为当前 iframe 绑定整页跳转监听
+  function bindActiveIframeLoad() {
+    const iframe = getActiveIframe();
+    if (observedIframe === iframe) return;
+
+    if (observedIframe && iframeLoadHandler) {
+      observedIframe.removeEventListener('load', iframeLoadHandler);
+    }
+
+    observedIframe = iframe;
+    if (!observedIframe) return;
+
+    iframeLoadHandler = () => {
+      if (observedIframe === getActiveIframe()) {
+        schedulePageResearch(250);
+      }
+    };
+    observedIframe.addEventListener('load', iframeLoadHandler);
+  }
+
+  // 监听标签切换，并将搜索监听迁移到新的活动页面
+  function setupPageChangeListeners() {
+    bindActiveIframeLoad();
+
+    tabActivatedHandler = () => {
+      removeScrollListener();
+      removeMutationObserver();
+      clearHighlights();
+      updateCount();
+      bindActiveIframeLoad();
+      schedulePageResearch(100);
+    };
+    window.addEventListener('tauri-tab-activated', tabActivatedHandler);
+  }
+
+  function removePageChangeListeners() {
+    if (pageChangeTimeout) {
+      clearTimeout(pageChangeTimeout);
+      pageChangeTimeout = null;
+    }
+    if (observedIframe && iframeLoadHandler) {
+      observedIframe.removeEventListener('load', iframeLoadHandler);
+    }
+    if (tabActivatedHandler) {
+      window.removeEventListener('tauri-tab-activated', tabActivatedHandler);
+    }
+    observedIframe = null;
+    iframeLoadHandler = null;
+    tabActivatedHandler = null;
+  }
   
   // 滚动到当前高亮
   function scrollToCurrentHighlight() {
@@ -1314,15 +1398,25 @@ function showPageSearch() {
       const rect = range.getBoundingClientRect();
       const iframeWin = iframe.contentWindow;
       
-      // 计算需要滚动到的位置（使匹配项在视口中心）
-      const viewportHeight = iframeWin.innerHeight;
-      const scrollY = iframeWin.scrollY || iframeWin.pageYOffset || 0;
-      const targetY = scrollY + rect.top - viewportHeight / 2 + rect.height / 2;
-      
-      iframeWin.scrollTo({
-        top: Math.max(0, targetY),
-        behavior: 'smooth'
-      });
+      // 优先交给浏览器处理页面及表格等嵌套滚动容器
+      const targetElement = match.node.parentElement;
+      if (targetElement && typeof targetElement.scrollIntoView === 'function') {
+        targetElement.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+          inline: 'nearest'
+        });
+      } else {
+        // 降级处理：仅滚动 iframe 页面
+        const viewportHeight = iframeWin.innerHeight;
+        const scrollY = iframeWin.scrollY || iframeWin.pageYOffset || 0;
+        const targetY = scrollY + rect.top - viewportHeight / 2 + rect.height / 2;
+
+        iframeWin.scrollTo({
+          top: Math.max(0, targetY),
+          behavior: 'smooth'
+        });
+      }
       
       // 滚动后更新高亮位置
       setTimeout(updateHighlightPositions, 300);
@@ -1397,11 +1491,19 @@ function showPageSearch() {
   
   // 关闭搜索
   function closeSearch() {
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+      searchTimeout = null;
+    }
+
     // 移除滚动监听器
     removeScrollListener();
     
     // 移除 DOM 变化监听器
     removeMutationObserver();
+
+    // 移除页面和标签变化监听器
+    removePageChangeListeners();
     
     // 清除高亮
     clearHighlights();
@@ -1443,6 +1545,8 @@ function showPageSearch() {
   prevBtn.addEventListener('click', prevMatch);
   nextBtn.addEventListener('click', nextMatch);
   closeBtn.addEventListener('click', closeSearch);
+
+  setupPageChangeListeners();
   
   // 聚焦输入框，如果有选中文本则填入并搜索
   setTimeout(() => {
