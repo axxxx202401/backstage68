@@ -55,6 +55,36 @@ fn env_url() -> String {
         .to_string()
 }
 
+fn with_cache_busting_timestamp(raw_url: &str, timestamp_ms: u128) -> Result<String, String> {
+    let mut url = reqwest::Url::parse(raw_url)
+        .map_err(|error| format!("Invalid URL '{raw_url}': {error}"))?;
+    let retained_pairs: Vec<(String, String)> = url
+        .query_pairs()
+        .filter(|(key, _)| key != "_t")
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+
+    url.set_query(None);
+    {
+        let mut query = url.query_pairs_mut();
+        for (key, value) in retained_pairs {
+            query.append_pair(&key, &value);
+        }
+        query.append_pair("_t", &timestamp_ms.to_string());
+    }
+
+    Ok(url.into())
+}
+
+fn cache_busted_url(raw_url: &str) -> Result<String, String> {
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| format!("System time is before Unix epoch: {error}"))?
+        .as_millis();
+
+    with_cache_busting_timestamp(raw_url, timestamp_ms)
+}
+
 fn env_key() -> String {
     option_env!("TAURI_ENV_KEY")
         .unwrap_or("default")
@@ -594,8 +624,9 @@ async fn create_new_window(
 
     log!("🪟 Creating new window: {}", window_label);
 
-    // 使用传入的 URL（当前页面）或默认 URL
-    let target_url = current_url.unwrap_or_else(|| env_url());
+    // 使用传入的 URL（当前页面）或默认 URL，并刷新缓存失效时间戳
+    let source_url = current_url.unwrap_or_else(env_url);
+    let target_url = cache_busted_url(&source_url)?;
     log!("   Target URL: {}", target_url);
 
     // 获取注入脚本
@@ -725,7 +756,8 @@ pub fn run() {
             log!("🚀 Creating main window...");
 
             // 准备注入脚本：将 inject.js 内容和目标 URL 变量合并
-            let target_url = env_url();
+            let target_url = cache_busted_url(&env_url())
+                .expect("Failed to add cache-busting timestamp to main URL");
             let final_script = format!(
                 "window.__TAURI_ENABLE_LOGS__ = {};\n{}",
                 ENABLE_LOGS, inject_script
@@ -804,7 +836,7 @@ fn create_reopen_window(app: &tauri::AppHandle) -> Result<(), String> {
     let window_id = REOPEN_COUNTER.fetch_add(1, Ordering::SeqCst);
     let window_label = format!("reopen-{}", window_id);
     
-    let target_url = env_url();
+    let target_url = cache_busted_url(&env_url())?;
     let inject_script = include_str!("../../src/inject.js");
     let final_script = format!(
         "window.__TAURI_ENABLE_LOGS__ = {};\n{}",
@@ -825,4 +857,50 @@ fn create_reopen_window(app: &tauri::AppHandle) -> Result<(), String> {
     
     log!("✓ New window created: {}", window_label);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::with_cache_busting_timestamp;
+
+    #[test]
+    fn appends_timestamp_to_url_without_query() {
+        assert_eq!(
+            with_cache_busting_timestamp("https://example.com/path", 123).unwrap(),
+            "https://example.com/path?_t=123"
+        );
+    }
+
+    #[test]
+    fn preserves_existing_query_parameters() {
+        assert_eq!(
+            with_cache_busting_timestamp("https://example.com/path?lang=zh", 123).unwrap(),
+            "https://example.com/path?lang=zh&_t=123"
+        );
+    }
+
+    #[test]
+    fn replaces_existing_timestamp() {
+        assert_eq!(
+            with_cache_busting_timestamp(
+                "https://example.com/path?foo=bar&_t=old&lang=zh",
+                123,
+            )
+            .unwrap(),
+            "https://example.com/path?foo=bar&lang=zh&_t=123"
+        );
+    }
+
+    #[test]
+    fn preserves_fragment() {
+        assert_eq!(
+            with_cache_busting_timestamp("https://example.com/path?foo=bar#section", 123).unwrap(),
+            "https://example.com/path?foo=bar&_t=123#section"
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_url() {
+        assert!(with_cache_busting_timestamp("not a url", 123).is_err());
+    }
 }
