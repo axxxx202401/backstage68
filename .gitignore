@@ -21,6 +21,7 @@ dist-apps/
 .history
 .idea
 .DS_Store
+.worktrees/
 
 # 备份文件
 src/inject.backup.js
