@@ -4,6 +4,7 @@
 
 import { TAB_CONFIG, updateTabWidths } from './ui.js';
 import { applyLinuxFixesToIframe } from '../linux-fixes.js';
+import { freshCacheBustedUrl } from '../utils/url.js';
 
 // 创建标签 DOM 元素
 export function createTabElement(id, title, callbacks) {
@@ -288,8 +289,9 @@ export function createTab(url) {
   
   const id = 'tab-' + (++window.tauriTabs.nextId);
   const title = '加载中...';
+  const targetUrl = freshCacheBustedUrl(url);
   
-  log(`📑 创建新标签: ${id}, URL: ${url}`);
+  log(`📑 创建新标签: ${id}, 实际 URL: ${targetUrl}`);
   
   const tabElement = createTabElement(id, title, {
     onClose: closeTab,
@@ -297,7 +299,7 @@ export function createTab(url) {
     onContextMenu: window.tauriTabs.showContextMenu || (() => {})
   });
   
-  const iframe = createIframe(url, log);
+  const iframe = createIframe(targetUrl, log);
   
   const tabsContainer = document.querySelector('.tauri-tabs-container');
   const newTabBtn = tabsContainer.querySelector('.tauri-new-tab');
@@ -305,7 +307,7 @@ export function createTab(url) {
   
   const tabData = {
     id,
-    url,
+    url: targetUrl,
     title,
     element: tabElement,
     iframe
