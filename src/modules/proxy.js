@@ -111,7 +111,7 @@ export function initProxy(log, invoke) {
       return originalFetch.apply(this, arguments);
     }
 
-    if (!url.includes('/base_api/')) {
+    if (!url.includes('/base_api')) {
       return originalFetch.apply(this, arguments);
     }
 
@@ -243,7 +243,7 @@ export function initProxy(log, invoke) {
       url = window.location.origin + url;
     }
     
-    if (!url.includes('/base_api/')) {
+    if (!url.includes('/base_api')) {
       const originalXHR = new OriginalXHR();
       originalXHR.open(this.method, this.url, true);
       for (const [key, value] of Object.entries(this.headers)) {

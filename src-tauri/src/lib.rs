@@ -12,6 +12,7 @@ use proxy::AppState;
 
 // 常量定义
 const DEVTOOLS_OPEN_DELAY_SECS: u64 = 3;
+const POST_MESSAGE_INVOKE_SYSTEM: &str = include_str!("post-message-ipc.js");
 
 /// 转义 JavaScript 字符串中的特殊字符
 fn escape_js_string(s: &str) -> String {
@@ -710,7 +711,7 @@ async fn create_new_window(
     )
     .title(format!("{} - 窗口 {}", env_name(), window_id))
     .inner_size(target_width, target_height)
-    .initialization_script(&final_script)
+    .initialization_script_for_all_frames(&final_script)
     .build()
     .map_err(|e| format!("Failed to create window: {}", e))?;
 
@@ -751,6 +752,7 @@ pub fn run() {
     );
 
     Builder::default()
+        .invoke_system(POST_MESSAGE_INVOKE_SYSTEM)
         .manage(app_state)
         .setup(move |app| {
             log!("🚀 Creating main window...");
@@ -772,7 +774,7 @@ pub fn run() {
             .title(format!("Backstage68 - {}", env_name()))
             .inner_size(1200.0, 800.0)
             .resizable(true)
-            .initialization_script(&final_script)
+            .initialization_script_for_all_frames(&final_script)
             .build()
             .expect("Failed to create window");
 
@@ -851,7 +853,7 @@ fn create_reopen_window(app: &tauri::AppHandle) -> Result<(), String> {
     .title(format!("Backstage68 - {}", env_name()))
     .inner_size(1200.0, 800.0)
     .resizable(true)
-    .initialization_script(&final_script)
+    .initialization_script_for_all_frames(&final_script)
     .build()
     .map_err(|e| format!("Failed to create window: {}", e))?;
     

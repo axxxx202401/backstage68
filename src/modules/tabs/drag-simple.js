@@ -4,6 +4,7 @@
  */
 
 import Sortable from 'sortablejs';
+import { getAccessibleIframeContext } from '../utils/iframe.js';
 
 export function setupSimpleDrag(log) {
   // 动态加载 Animate.css
@@ -152,8 +153,9 @@ export function setupSimpleDrag(log) {
               
               // 尝试从 iframe 获取实际 URL
               try {
-                if (tabData.iframe && tabData.iframe.contentWindow) {
-                  const iframeUrl = tabData.iframe.contentWindow.location.href;
+                const iframeWindow = getAccessibleIframeContext(tabData.iframe)?.window;
+                if (iframeWindow) {
+                  const iframeUrl = iframeWindow.location.href;
                   if (iframeUrl && iframeUrl !== 'about:blank') {
                     currentUrl = iframeUrl;
                   }

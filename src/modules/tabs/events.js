@@ -5,6 +5,7 @@
 import { createTab, closeTab, activateTab, refreshTab, hardRefreshTab, duplicateTab, openTabInNewWindow, closeTabsToLeft, closeTabsToRight, closeOtherTabs, reorderTabs, getTabCurrentUrl, switchToNextTab, switchToPrevTab } from './operations.js';
 import { setupSimpleDrag } from './drag-simple.js';
 import { isMac, isLinux, isWindows } from '../utils/dom.js';
+import { getAccessibleIframeContext } from '../utils/iframe.js';
 
 // 初始化事件监听
 export function initTabEvents() {
@@ -617,7 +618,7 @@ function showTabContextMenu(tabId, x, y) {
         // 移除所有 iframe 的监听器
         window.tauriTabs.tabs.forEach(tab => {
           try {
-            const iframeDoc = tab.iframe.contentDocument;
+            const iframeDoc = getAccessibleIframeContext(tab.iframe)?.document;
             if (iframeDoc) {
               iframeDoc.removeEventListener('click', closeMenu, true);
               iframeDoc.removeEventListener('contextmenu', closeMenu, true);
@@ -635,7 +636,7 @@ function showTabContextMenu(tabId, x, y) {
     // 在所有 iframe 添加监听器
     window.tauriTabs.tabs.forEach(tab => {
       try {
-        const iframeDoc = tab.iframe.contentDocument;
+        const iframeDoc = getAccessibleIframeContext(tab.iframe)?.document;
         if (iframeDoc) {
           iframeDoc.addEventListener('click', closeMenu, true);
           iframeDoc.addEventListener('contextmenu', closeMenu, true);
@@ -895,7 +896,7 @@ function showPageSearch() {
   try {
     const activeTab = window.tauriTabs.tabs.find(t => t.id === window.tauriTabs.activeTabId);
     if (activeTab && activeTab.iframe) {
-      const iframeWindow = activeTab.iframe.contentWindow;
+      const iframeWindow = getAccessibleIframeContext(activeTab.iframe)?.window;
       if (iframeWindow && iframeWindow.getSelection) {
         selectedText = iframeWindow.getSelection().toString().trim();
       }
@@ -1028,8 +1029,10 @@ function showPageSearch() {
     if (!iframe || !highlightOverlay) return;
     
     try {
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-      const iframeWin = iframe.contentWindow;
+      const iframeContext = getAccessibleIframeContext(iframe);
+      if (!iframeContext) return;
+      const iframeDoc = iframeContext.document;
+      const iframeWin = iframeContext.window;
       const scrollX = iframeWin.scrollX || iframeWin.pageXOffset || 0;
       const scrollY = iframeWin.scrollY || iframeWin.pageYOffset || 0;
       
@@ -1100,8 +1103,9 @@ function showPageSearch() {
     if (!iframe) return;
     
     try {
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-      const iframeWin = iframe.contentWindow;
+      const iframeContext = getAccessibleIframeContext(iframe);
+      if (!iframeContext) return;
+      const iframeDoc = iframeContext.document;
       const queryLower = query.toLowerCase();
       
       // 创建覆盖层
@@ -1176,18 +1180,21 @@ function showPageSearch() {
     if (!iframe) return;
     
     try {
-      const iframeWin = iframe.contentWindow;
+      const iframeContext = getAccessibleIframeContext(iframe);
+      if (!iframeContext) return;
+      const iframeWin = iframeContext.window;
       
       // 移除旧的监听器
       if (scrollIframe) {
-        const oldIframeWin = scrollIframe.contentWindow;
-        const oldIframeDoc = scrollIframe.contentDocument || oldIframeWin.document;
-        if (scrollHandler) {
-          oldIframeWin.removeEventListener('scroll', scrollHandler, true);
-          oldIframeDoc.removeEventListener('scroll', scrollHandler, true);
-        }
-        if (resizeHandler) {
-          oldIframeWin.removeEventListener('resize', resizeHandler);
+        const oldIframeContext = getAccessibleIframeContext(scrollIframe);
+        if (oldIframeContext) {
+          if (scrollHandler) {
+            oldIframeContext.window.removeEventListener('scroll', scrollHandler, true);
+            oldIframeContext.document.removeEventListener('scroll', scrollHandler, true);
+          }
+          if (resizeHandler) {
+            oldIframeContext.window.removeEventListener('resize', resizeHandler);
+          }
         }
       }
       
@@ -1211,8 +1218,7 @@ function showPageSearch() {
       iframeWin.addEventListener('resize', resizeHandler);
       
       // 也监听 iframe 内部的滚动容器
-      const iframeDoc = iframe.contentDocument || iframeWin.document;
-      iframeDoc.addEventListener('scroll', scrollHandler, true);
+      iframeContext.document.addEventListener('scroll', scrollHandler, true);
       scrollIframe = iframe;
       
     } catch (err) {
@@ -1226,16 +1232,16 @@ function showPageSearch() {
     if (!iframe) return;
     
     try {
-      const iframeWin = iframe.contentWindow;
-      const iframeDoc = iframe.contentDocument || iframeWin.document;
+      const iframeContext = getAccessibleIframeContext(iframe);
+      if (!iframeContext) return;
       
       if (scrollHandler) {
-        iframeWin.removeEventListener('scroll', scrollHandler, true);
-        iframeDoc.removeEventListener('scroll', scrollHandler, true);
+        iframeContext.window.removeEventListener('scroll', scrollHandler, true);
+        iframeContext.document.removeEventListener('scroll', scrollHandler, true);
         scrollHandler = null;
       }
       if (resizeHandler) {
-        iframeWin.removeEventListener('resize', resizeHandler);
+        iframeContext.window.removeEventListener('resize', resizeHandler);
         resizeHandler = null;
       }
       scrollIframe = null;
@@ -1248,7 +1254,8 @@ function showPageSearch() {
     if (!iframe) return;
     
     try {
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+      const iframeDoc = getAccessibleIframeContext(iframe)?.document;
+      if (!iframeDoc) return;
       
       // 移除旧的观察器
       if (mutationObserver) {
@@ -1386,7 +1393,9 @@ function showPageSearch() {
     if (!iframe) return;
     
     try {
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+      const iframeContext = getAccessibleIframeContext(iframe);
+      if (!iframeContext) return;
+      const iframeDoc = iframeContext.document;
       const match = matchRects[currentIndex];
       
       if (!match.node || !match.node.parentNode) return;
@@ -1396,7 +1405,7 @@ function showPageSearch() {
       range.setEnd(match.node, match.index + match.length);
       
       const rect = range.getBoundingClientRect();
-      const iframeWin = iframe.contentWindow;
+      const iframeWin = iframeContext.window;
       
       // 优先交给浏览器处理页面及表格等嵌套滚动容器
       const targetElement = match.node.parentElement;
@@ -1444,7 +1453,8 @@ function showPageSearch() {
     if (!iframe) return false;
     
     try {
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+      const iframeDoc = getAccessibleIframeContext(iframe)?.document;
+      if (!iframeDoc) return false;
       // 检查第一个匹配项的节点是否还在 DOM 中
       const firstMatch = matchRects[0];
       return firstMatch.node && firstMatch.node.parentNode && iframeDoc.contains(firstMatch.node);

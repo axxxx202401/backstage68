@@ -1,8 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": ["main"],
+  "description": "Capability for application windows",
+  "windows": ["main", "window-*", "reopen-*"],
+  "remote": {
+    "urls": [
+      "https://test-otc.68chat.co/**",
+      "https://stage-otc.68chat.co/**",
+      "https://b12e88-gg-ooxx.8cmanage.com/**"
+    ]
+  },
   "permissions": [
     "core:default",
     "core:webview:allow-internal-toggle-devtools"

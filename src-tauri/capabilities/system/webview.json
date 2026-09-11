@@ -3,13 +3,14 @@
   "identifier": "system:webview",
   "description": "Webview zoom permissions for all URLs including remote",
   "local": false,
-  "windows": ["main"],
+  "windows": ["main", "window-*", "reopen-*"],
   "permissions": [
     {
       "identifier": "core:webview:allow-set-webview-zoom",
       "allow": [
-        { "url": "https://**" },
-        { "url": "http://**" },
+        { "url": "https://test-otc.68chat.co/**" },
+        { "url": "https://stage-otc.68chat.co/**" },
+        { "url": "https://b12e88-gg-ooxx.8cmanage.com/**" },
         { "url": "tauri://**" }
       ]
     }

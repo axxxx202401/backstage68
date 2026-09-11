@@ -1,0 +1,13 @@
+---
+description: 强制所有 base_api 请求经过 Rust 安全代理
+alwaysApply: true
+---
+
+# `/base_api` 代理硬约束
+
+- 任何平台、主窗口、动态窗口及 iframe 中，URL 包含 `/base_api` 的 Fetch/XHR 请求都必须调用 Rust `proxy_request`。
+- 禁止让 `/base_api` 请求由 WebView 或浏览器直接发送。
+- 窗口初始化脚本必须注入所有 frame，确保 iframe 在业务脚本执行前安装代理。
+- 代理必须添加 `X-Client-Signature`、`X-Timestamp`、`X-Device-Fingerprint` 和 `X-Device-Info` 安全头。
+- 修改窗口、iframe、注入脚本或代理代码时，必须运行 `/Volumes/TRANSCEND/works/objects/github/backstage68/tests/base-api-proxy.test.js`。
+- 验收 `/base_api/loginCheck` 时，Rust 控制台必须出现 `[PROXY REQUEST]`，不得只依据页面响应判断。

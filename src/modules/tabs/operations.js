@@ -5,6 +5,7 @@
 import { TAB_CONFIG, updateTabWidths } from './ui.js';
 import { applyLinuxFixesToIframe } from '../linux-fixes.js';
 import { freshCacheBustedUrl } from '../utils/url.js';
+import { getAccessibleIframeContext } from '../utils/iframe.js';
 
 // 创建标签 DOM 元素
 export function createTabElement(id, title, callbacks) {
@@ -69,36 +70,6 @@ export function createIframeContainer() {
   return container;
 }
 
-// 创建 iframe
-function inheritIframeProxy(iframe, log) {
-  const MAX_ATTEMPTS = 5;
-  let attempt = 0;
-
-  function applyProxy() {
-    attempt++;
-    try {
-      const iframeWindow = iframe.contentWindow;
-      if (!iframeWindow) {
-        throw new Error('contentWindow 不可用');
-      }
-      iframeWindow.fetch = window.fetch;
-      iframeWindow.XMLHttpRequest = window.XMLHttpRequest;
-      log(`✅ iframe 已继承父窗口的代理 (第 ${attempt} 次尝试)`);
-      return true;
-    } catch (err) {
-      if (attempt < MAX_ATTEMPTS) {
-        log(`⏳ iframe 代理未就绪，准备重试 (${attempt}/${MAX_ATTEMPTS})`);
-        setTimeout(applyProxy, 100 * attempt);
-      } else {
-        log(`⚠️  无法设置 iframe 代理: ${err.message}`);
-      }
-      return false;
-    }
-  }
-
-  applyProxy();
-}
-
 export function createIframe(url, log) {
   const container = document.querySelector('.tauri-iframe-container') || createIframeContainer();
   
@@ -111,7 +82,7 @@ export function createIframe(url, log) {
   // 设置 iframe 事件的函数
   const setupIframeEventsWrapper = () => {
     try {
-      const iframeDoc = iframe.contentDocument;
+      const iframeDoc = getAccessibleIframeContext(iframe)?.document;
       if (iframeDoc && window.self === window.top) {
         // 在 iframe 内部添加键盘事件监听器
         setupIframeEvents(iframeDoc, log);
@@ -129,9 +100,8 @@ export function createIframe(url, log) {
     }
   };
   
-  // iframe 加载完成后，设置代理和事件监听
+  // iframe 内的文档启动脚本负责安装 Rust 代理桥；这里只绑定安全事件
   iframe.addEventListener('load', () => {
-    inheritIframeProxy(iframe, log);
     setupIframeEventsWrapper();
     log(`✅ iframe 事件监听器已安装`);
   });
@@ -146,7 +116,7 @@ export function createIframe(url, log) {
         return;
       }
       
-      const iframeDoc = iframe.contentDocument;
+      const iframeDoc = getAccessibleIframeContext(iframe)?.document;
       if (iframeDoc && !iframeDoc.__tauriEventsSetup) {
         log('🔄 检测到 iframe document 变化，重新绑定事件');
         setupIframeEventsWrapper();
@@ -338,7 +308,12 @@ function setupTitleObserver(iframe, id, tabData, log) {
     }
     
     try {
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+      const iframeDoc = getAccessibleIframeContext(iframe)?.document;
+      if (!iframeDoc) {
+        updateTabTitle(id, tabData.url);
+        log('⚠️  iframe 处于跨域或沙箱环境，跳过标题同步');
+        return;
+      }
       const newTitle = iframeDoc.title || tabData.url;
       updateTabTitle(id, newTitle);
       
@@ -461,7 +436,7 @@ export function hardRefreshTab(tabId) {
   // 获取当前 URL
   let currentUrl = tab.url;
   try {
-    const iframeUrl = tab.iframe.contentWindow?.location?.href;
+    const iframeUrl = getAccessibleIframeContext(tab.iframe)?.window.location.href;
     if (iframeUrl && !iframeUrl.startsWith('about:')) {
       currentUrl = iframeUrl;
     }
@@ -500,8 +475,7 @@ export function getTabCurrentUrl(tab, log) {
   }
   
   try {
-    const iframeWindow = tab.iframe.contentWindow;
-    const href = iframeWindow?.location?.href;
+    const href = getAccessibleIframeContext(tab.iframe)?.window.location.href;
     if (href) {
       if (log) {
         log(`   使用 iframe 当前 URL: ${href}`);

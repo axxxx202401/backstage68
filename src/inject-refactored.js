@@ -23,6 +23,7 @@
 import { initLogger } from './modules/logger.js';
 import { isInIframe } from './modules/utils/dom.js';
 import { initProxy } from './modules/proxy.js';
+import { createFrameProxyInvoke, initMainFrameProxyBridge } from './modules/proxy-bridge.js';
 import { initZoom } from './modules/zoom.js';
 import { initWindow } from './modules/window.js';
 import { initTabs } from './modules/tabs/manager.js';
@@ -34,19 +35,13 @@ import { initDownload } from './modules/download.js';
   log("🚀 Tauri 注入脚本启动（重构版）");
 
   const isIframe = isInIframe();
-
-  // 检查 Tauri API
-  if (!window.__TAURI__ || !window.__TAURI__.core || !window.__TAURI__.core.invoke) {
-    console.error("❌ Tauri API 不可用！代理将无法工作");
-    return;
-  }
-
-  const invoke = window.__TAURI__.core.invoke;
-  log("✅ Tauri API 准备就绪");
+  const tauriInvoke = window.__TAURI__?.core?.invoke;
 
   if (isIframe) {
-    log("⚠️  当前处于 iframe，上线轻量模式：仅启用代理模块");
+    const invoke = createFrameProxyInvoke(log);
+    log("✅ iframe 使用主窗口 Rust 代理桥");
     try {
+      initMainFrameProxyBridge(log, invoke);
       initProxy(log, invoke);
       log("✅ iframe 代理模块已启用");
     } catch (err) {
@@ -54,6 +49,16 @@ import { initDownload } from './modules/download.js';
     }
     return;
   }
+
+  // 检查 Tauri API
+  if (!tauriInvoke) {
+    console.error("❌ Tauri API 不可用！代理将无法工作");
+    return;
+  }
+
+  const invoke = tauriInvoke;
+  log("✅ Tauri API 准备就绪");
+  initMainFrameProxyBridge(log, invoke);
 
   // 初始化各模块
   try {
