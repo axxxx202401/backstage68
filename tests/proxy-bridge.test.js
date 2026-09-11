@@ -23,28 +23,39 @@ function createEventTarget() {
   };
 }
 
+function createMessageChannel() {
+  const port1 = {
+    onmessage: null,
+    postMessage(data) {
+      port2.onmessage?.({ data });
+    },
+    close() {}
+  };
+  const port2 = {
+    onmessage: null,
+    postMessage(data) {
+      port1.onmessage?.({ data });
+    },
+    close() {}
+  };
+  return { port1, port2 };
+}
+
 const parentEvents = createEventTarget();
-const childEvents = createEventTarget();
 const parentWindow = {
   ...parentEvents,
-  location: { origin: 'https://stage-otc.68chat.co' }
+  location: { origin: 'https://stage-otc.68chat.co' },
+  postMessage(data, _targetOrigin, ports) {
+    parentWindow.dispatch('message', {
+      data,
+      origin: 'null',
+      source: null,
+      ports
+    });
+  }
 };
 const childWindow = {
-  ...childEvents,
-  parent: {
-    postMessage(data) {
-      parentWindow.dispatch('message', {
-        data,
-        origin: 'null',
-        source: childSource
-      });
-    }
-  }
-};
-const childSource = {
-  postMessage(data) {
-    childWindow.dispatch('message', { data, source: parentWindow });
-  }
+  top: parentWindow
 };
 
 let receivedCommand;
@@ -55,7 +66,12 @@ initMainFrameProxyBridge(() => {}, async (command, args) => {
   return { status: 200, headers: {}, body: '{"ok":true}', is_binary: false };
 }, parentWindow);
 
-const frameInvoke = createFrameProxyInvoke(() => {}, childWindow, 1000);
+const frameInvoke = createFrameProxyInvoke(
+  () => {},
+  childWindow,
+  1000,
+  createMessageChannel
+);
 const request = {
   method: 'POST',
   url: 'https://stage-otc.68chat.co/base_api/loginCheck',
@@ -75,40 +91,16 @@ await assert.rejects(
   /拒绝代理非当前站点/
 );
 
-const middleEvents = createEventTarget();
-const nestedEvents = createEventTarget();
-const middleWindow = {
-  ...middleEvents,
-  location: { origin: parentWindow.location.origin }
-};
 const nestedWindow = {
-  ...nestedEvents,
-  location: { origin: parentWindow.location.origin }
-};
-const middleSource = {
-  postMessage(data) {
-    middleWindow.dispatch('message', { data, source: parentWindow });
-  }
-};
-const nestedSource = {
-  postMessage(data) {
-    nestedWindow.dispatch('message', { data, source: middleWindow });
-  }
-};
-middleWindow.parent = {
-  postMessage(data) {
-    parentWindow.dispatch('message', { data, origin: 'null', source: middleSource });
-  }
-};
-nestedWindow.parent = {
-  postMessage(data) {
-    middleWindow.dispatch('message', { data, origin: 'null', source: nestedSource });
-  }
+  top: parentWindow
 };
 
-const middleInvoke = createFrameProxyInvoke(() => {}, middleWindow, 1000);
-initMainFrameProxyBridge(() => {}, middleInvoke, middleWindow);
-const nestedInvoke = createFrameProxyInvoke(() => {}, nestedWindow, 1000);
+const nestedInvoke = createFrameProxyInvoke(
+  () => {},
+  nestedWindow,
+  1000,
+  createMessageChannel
+);
 const nestedResponse = await nestedInvoke('proxy_request', { request });
 assert.equal(nestedResponse.status, 200);
 

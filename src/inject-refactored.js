@@ -41,7 +41,6 @@ import { initDownload } from './modules/download.js';
     const invoke = createFrameProxyInvoke(log);
     log("✅ iframe 使用主窗口 Rust 代理桥");
     try {
-      initMainFrameProxyBridge(log, invoke);
       initProxy(log, invoke);
       log("✅ iframe 代理模块已启用");
     } catch (err) {

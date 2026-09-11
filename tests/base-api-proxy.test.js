@@ -13,6 +13,10 @@ const injectSource = await readFile(
   new URL('../src/inject-refactored.js', import.meta.url),
   'utf8'
 );
+const bridgeSource = await readFile(
+  new URL('../src/modules/proxy-bridge.js', import.meta.url),
+  'utf8'
+);
 
 assert.equal(
   (rustSource.match(/\.initialization_script_for_all_frames\(/g) || []).length,
@@ -40,13 +44,21 @@ const iframeBranch = injectSource
   .split('if (isIframe)')[1] || '';
 assert.match(
   iframeBranch,
-  /initMainFrameProxyBridge\(log, invoke\)[\s\S]*initProxy\(log, invoke\)/,
-  'every iframe must relay nested-frame requests before installing its own proxy'
+  /createFrameProxyInvoke\(log\)[\s\S]*initProxy\(log, invoke\)/,
+  'every iframe must install a top-window proxy bridge before its own proxy'
+);
+assert.doesNotMatch(
+  iframeBranch,
+  /initMainFrameProxyBridge/,
+  'only top-level windows should receive proxy requests'
 );
 assert.doesNotMatch(
   iframeBranch,
   /tauriInvoke\s*\|\|/,
   'iframes must not try the blocked Tauri custom IPC protocol before using the bridge'
 );
+assert.match(bridgeSource, /targetWindow\.top\.postMessage\(/);
+assert.match(bridgeSource, /event\.ports\??\.\[0\]/);
+assert.doesNotMatch(bridgeSource, /event\.source/);
 
 console.log('base_api proxy invariants passed');
