@@ -25,9 +25,10 @@ function logProxyTarget(response, fallbackUrl, fallbackMethod) {
   const ipList = debug?.resolved_ips || response?.resolved_ips || [];
   const ips = Array.isArray(ipList) && ipList.length ? ipList.join(' | ') : '-';
   const ip = debug?.preferred_ip || response?.preferred_ip || ipList[0] || '-';
+  const deviceIp = debug?.device_ip || response?.device_ip || window.__TAURI_DEVICE_IP__ || '-';
 
   console.log(
-    `[PROXY] ${method} ${status} ${url}\n域名: ${host}  连接IP: ${ip}  解析: ${ips}`
+    `[PROXY] ${method} ${status} ${url}\n域名: ${host}  设备IP: ${deviceIp}  连接IP: ${ip}  解析: ${ips}`
   );
 
   if (!debug) return;
@@ -43,6 +44,7 @@ function logProxyTarget(response, fallbackUrl, fallbackMethod) {
   console.log('🌐 Host:', host);
   console.log('🌐 Resolved IPs:', ips);
   console.log('🎯 Connect IP:', ip);
+  console.log('💻 Device IP:', deviceIp);
   console.log('🔧 Request Method:', method);
   console.log('📤 Request Headers:', debug.request_headers);
   if (debug.request_body) {
@@ -232,7 +234,8 @@ export function initProxy(log, invoke) {
       });
       
     } catch (err) {
-      log.error("❌ Proxy Request Failed:", err);
+      const reason = err instanceof Error ? err.message : String(err);
+      console.error(`[PROXY] ${reason}`);
       throw err;
     }
   };
@@ -359,7 +362,8 @@ export function initProxy(log, invoke) {
           if (self.onload) self.onload();
           
         } catch (err) {
-          log.error("XHR FormData Error:", err);
+          const reason = err instanceof Error ? err.message : String(err);
+          console.error(`[PROXY] ${reason}`);
           if (self.onerror) self.onerror(err);
         }
       })();
@@ -403,7 +407,8 @@ export function initProxy(log, invoke) {
         if (self.onload) self.onload();
       })
       .catch(err => {
-        log.error("XHR Proxy Error", err);
+        const reason = err instanceof Error ? err.message : String(err);
+        console.error(`[PROXY] ${reason}`);
         if (self.onerror) self.onerror(err);
       });
   };

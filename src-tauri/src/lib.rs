@@ -44,6 +44,15 @@ macro_rules! log {
     };
 }
 
+fn inject_prelude() -> String {
+    let device_ip = fingerprint::get_device_info().local_ip;
+    format!(
+        "window.__TAURI_ENABLE_LOGS__ = {};\nwindow.__TAURI_DEVICE_IP__ = {};\n",
+        ENABLE_LOGS,
+        serde_json::to_string(&device_ip).unwrap_or_else(|_| "\"-\"".to_string())
+    )
+}
+
 fn env_name() -> String {
     option_env!("TAURI_ENV_NAME")
         .unwrap_or("Backstage68")
@@ -681,8 +690,10 @@ async fn create_new_window(
     };
 
     let final_script = format!(
-        "window.__TAURI_ENABLE_LOGS__ = {};\n{}\n{}",
-        ENABLE_LOGS, inject_script, storage_restore_script
+        "{}{}\n{}",
+        inject_prelude(),
+        inject_script,
+        storage_restore_script
     );
 
     // 新窗口直接打开目标 URL（不是首页）
@@ -760,10 +771,7 @@ pub fn run() {
             // 准备注入脚本：将 inject.js 内容和目标 URL 变量合并
             let target_url = cache_busted_url(&env_url())
                 .expect("Failed to add cache-busting timestamp to main URL");
-            let final_script = format!(
-                "window.__TAURI_ENABLE_LOGS__ = {};\n{}",
-                ENABLE_LOGS, inject_script
-            );
+            let final_script = format!("{}{}", inject_prelude(), inject_script);
 
             // 创建主窗口（使用固定 label "main"）
             let window = WebviewWindowBuilder::new(
@@ -840,10 +848,7 @@ fn create_reopen_window(app: &tauri::AppHandle) -> Result<(), String> {
     
     let target_url = cache_busted_url(&env_url())?;
     let inject_script = include_str!("../../src/inject.js");
-    let final_script = format!(
-        "window.__TAURI_ENABLE_LOGS__ = {};\n{}",
-        ENABLE_LOGS, inject_script
-    );
+    let final_script = format!("{}{}", inject_prelude(), inject_script);
     
     WebviewWindowBuilder::new(
         app,

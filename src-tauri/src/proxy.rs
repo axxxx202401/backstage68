@@ -1,5 +1,5 @@
 use crate::crypto::{encrypt_signature, generate_signature_data};
-use crate::fingerprint::{get_device_fingerprint, get_device_info_json};
+use crate::fingerprint::{get_device_fingerprint, get_device_info, get_device_info_json};
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -100,6 +100,7 @@ pub struct ProxyResponse {
     pub resolved_host: String,
     pub resolved_ips: Vec<String>,
     pub preferred_ip: String,
+    pub device_ip: String,
     // 用于开发调试：记录完整的请求信息
     #[serde(skip_serializing_if = "Option::is_none")]
     pub debug_info: Option<ProxyDebugInfo>,
@@ -116,6 +117,7 @@ pub struct ProxyDebugInfo {
     pub resolved_host: String,
     pub resolved_ips: Vec<String>,
     pub preferred_ip: String,
+    pub device_ip: String,
 }
 
 struct ResolvedTarget {
@@ -173,6 +175,7 @@ pub async fn proxy_request(
     }
 
     let resolved = ResolvedTarget::from_url(&request.url);
+    let device_ip = get_device_info().local_ip;
 
     log!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     log!("🔄 [PROXY REQUEST]");
@@ -181,6 +184,7 @@ pub async fn proxy_request(
     log!("🌐 域名: {}", if resolved.host.is_empty() { "-" } else { &resolved.host });
     log!("🌐 解析 IP: {}", resolved.ips_display());
     log!("🎯 优先连接 IP: {}", resolved.preferred_ip());
+    log!("💻 设备 IP: {}", device_ip);
 
     let app_state = state.lock().await;
     let client = &app_state.client;
@@ -300,13 +304,15 @@ pub async fn proxy_request(
             log!("❌ 请求失败");
             log!("   URL: {}", request.url);
             log!("   域名: {}", resolved.host);
+            log!("   设备 IP: {}", device_ip);
             log!("   解析 IP: {}", resolved.ips_display());
             log!("   优先 IP: {}", resolved.preferred_ip());
             log!("   错误: {}", e);
             format!(
-                "请求失败 URL={} 域名={} 解析IP={} 连接IP={} 错误={}",
+                "请求失败 URL={} 域名={} 设备IP={} 解析IP={} 连接IP={} 错误={}",
                 request.url,
                 resolved.host,
+                device_ip,
                 resolved.ips_display(),
                 resolved.preferred_ip(),
                 e
@@ -365,6 +371,7 @@ pub async fn proxy_request(
         log!("   域名: {}", resolved.host);
         log!("   解析 IP: {}", resolved.ips_display());
         log!("   连接 IP: {}", resolved.preferred_ip());
+        log!("   设备 IP: {}", device_ip);
         log!("   状态: {}", status);
     }
 
@@ -388,6 +395,7 @@ pub async fn proxy_request(
             resolved_host: resolved.host.clone(),
             resolved_ips: resolved.ips.clone(),
             preferred_ip: resolved.preferred_ip().to_string(),
+            device_ip: device_ip.clone(),
         })
     } else {
         None
@@ -401,6 +409,7 @@ pub async fn proxy_request(
         resolved_host: resolved.host.clone(),
         resolved_ips: resolved.ips.clone(),
         preferred_ip: resolved.preferred_ip().to_string(),
+        device_ip,
         debug_info,
     })
 }

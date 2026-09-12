@@ -57,6 +57,11 @@ assert.doesNotMatch(
   /tauriInvoke\s*\|\|/,
   'iframes must not try the blocked Tauri custom IPC protocol before using the bridge'
 );
+assert.match(
+  bridgeSource,
+  /top\?\.__(TAURI__)__\?\.core\?\.invoke|__TAURI__\?\.core\?\.invoke/,
+  'same-origin iframes must call top-window invoke and skip MessagePort'
+);
 assert.match(bridgeSource, /topWindow\.postMessage\(/);
 assert.match(bridgeSource, /event\.ports\??\.\[0\]/);
 assert.match(bridgeSource, /event\.source/, 'Linux WebKit 常丢掉 MessagePort，必须能用 event.source 回包');

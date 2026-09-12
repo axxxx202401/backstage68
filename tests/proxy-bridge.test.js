@@ -152,4 +152,53 @@ const fallbackResponse = await fallbackInvoke('proxy_request', {
 assert.equal(fallbackCommand, 'proxy_request');
 assert.equal(fallbackResponse.status, 200);
 
+let directCommand;
+const directParent = {
+  location: { origin: 'https://stage-otc.68chat.co' },
+  __TAURI__: {
+    core: {
+      async invoke(command, args) {
+        directCommand = command;
+        assert.deepEqual(args, { request });
+        return {
+          status: 200,
+          headers: {},
+          body: '{"ok":true}',
+          is_binary: false,
+          preferred_ip: '1.2.3.4'
+        };
+      }
+    }
+  }
+};
+const directInvoke = createFrameProxyInvoke(
+  () => {},
+  { top: directParent, location: { origin: 'https://stage-otc.68chat.co' } },
+  50,
+  () => {
+    throw new Error('same-origin iframe must not use MessageChannel');
+  }
+);
+const directResponse = await directInvoke('proxy_request', { request });
+assert.equal(directCommand, 'proxy_request');
+assert.equal(directResponse.preferred_ip, '1.2.3.4');
+
+await assert.rejects(
+  directInvoke('proxy_request', {
+    request: { ...request, url: 'https://evil.example/base_api/loginCheck' }
+  }),
+  /拒绝代理非当前站点/
+);
+
+const silentInvoke = createFrameProxyInvoke(
+  () => {},
+  { top: { postMessage() {} } },
+  50,
+  createMessageChannel
+);
+await assert.rejects(
+  silentInvoke('proxy_request', { request }),
+  /顶层未确认收到/
+);
+
 console.log('proxy bridge tests passed');
