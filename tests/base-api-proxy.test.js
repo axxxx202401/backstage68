@@ -57,8 +57,8 @@ assert.doesNotMatch(
   /tauriInvoke\s*\|\|/,
   'iframes must not try the blocked Tauri custom IPC protocol before using the bridge'
 );
-assert.match(bridgeSource, /targetWindow\.top\.postMessage\(/);
+assert.match(bridgeSource, /topWindow\.postMessage\(/);
 assert.match(bridgeSource, /event\.ports\??\.\[0\]/);
-assert.doesNotMatch(bridgeSource, /event\.source/);
+assert.match(bridgeSource, /event\.source/, 'Linux WebKit 常丢掉 MessagePort，必须能用 event.source 回包');
 
 console.log('base_api proxy invariants passed');

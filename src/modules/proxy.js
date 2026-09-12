@@ -16,6 +16,56 @@ function isHeaders(value) {
   return toString.call(value) === '[object Headers]';
 }
 
+function logProxyTarget(response, fallbackUrl, fallbackMethod) {
+  const debug = response?.debug_info;
+  const url = debug?.request_url || fallbackUrl || '';
+  const method = debug?.request_method || fallbackMethod || '';
+  const status = debug?.response_status ?? response?.status ?? '';
+  const host = debug?.resolved_host || response?.resolved_host || '-';
+  const ipList = debug?.resolved_ips || response?.resolved_ips || [];
+  const ips = Array.isArray(ipList) && ipList.length ? ipList.join(' | ') : '-';
+  const ip = debug?.preferred_ip || response?.preferred_ip || ipList[0] || '-';
+
+  console.log(
+    `[PROXY] ${method} ${status} ${url}\n域名: ${host}  连接IP: ${ip}  解析: ${ips}`
+  );
+
+  if (!debug) return;
+
+  console.groupCollapsed(
+    `%c${method} %c${status} %c${url} %c${ip}`,
+    'color: #0066cc; font-weight: bold',
+    status >= 200 && status < 300 ? 'color: #00cc00; font-weight: bold' : 'color: #cc0000; font-weight: bold',
+    'color: #666',
+    'color: #d48806; font-weight: bold'
+  );
+  console.log('📍 Request URL:', url);
+  console.log('🌐 Host:', host);
+  console.log('🌐 Resolved IPs:', ips);
+  console.log('🎯 Connect IP:', ip);
+  console.log('🔧 Request Method:', method);
+  console.log('📤 Request Headers:', debug.request_headers);
+  if (debug.request_body) {
+    try {
+      console.log('📦 Request Body:', JSON.parse(debug.request_body));
+    } catch {
+      console.log('📦 Request Body:', debug.request_body);
+    }
+  }
+  console.log('📊 Response Status:', status);
+  console.log('📥 Response Headers:', debug.response_headers);
+  if (response.is_binary) {
+    console.log('📦 Response Type: Binary (base64 encoded)');
+  } else {
+    try {
+      console.log('📄 Response Body:', JSON.parse(response.body));
+    } catch {
+      console.log('📄 Response Body:', response.body);
+    }
+  }
+  console.groupEnd();
+}
+
 function isFormData(value) {
   if (!value) return false;
   if (typeof FormData !== 'undefined' && value instanceof FormData) return true;
@@ -153,31 +203,7 @@ export function initProxy(log, invoke) {
 
     try {
       const response = await invoke('proxy_request', { request: reqData });
-      
-      // 如果有调试信息，在控制台打印（类似 Network 面板）
-      if (response.debug_info) {
-        const debug = response.debug_info;
-        console.groupCollapsed(
-          `%c${debug.request_method} %c${debug.response_status} %c${debug.request_url}`,
-          'color: #0066cc; font-weight: bold',
-          debug.response_status >= 200 && debug.response_status < 300 ? 'color: #00cc00; font-weight: bold' : 'color: #cc0000; font-weight: bold',
-          'color: #666'
-        );
-        console.log('📍 Request URL:', debug.request_url);
-        console.log('🔧 Request Method:', debug.request_method);
-        console.log('📤 Request Headers:', debug.request_headers);
-        if (debug.request_body) {
-          console.log('📦 Request Body:', JSON.parse(debug.request_body));
-        }
-        console.log('📊 Response Status:', debug.response_status);
-        console.log('📥 Response Headers:', debug.response_headers);
-        if (response.is_binary) {
-          console.log('📦 Response Type: Binary (base64 encoded)');
-        } else {
-          console.log('📄 Response Body:', JSON.parse(response.body));
-        }
-        console.groupEnd();
-      }
+      logProxyTarget(response, reqData.url, reqData.method);
       
       if (response.status === 403) {
         log.error("⚠️ 403 Forbidden!");
@@ -305,31 +331,7 @@ export function initProxy(log, invoke) {
           delete reqData.headers['content-type'];
           
           const response = await invoke('proxy_request', { request: reqData });
-          
-          // 打印调试信息
-          if (response.debug_info) {
-            const debug = response.debug_info;
-            console.groupCollapsed(
-              `%c${debug.request_method} %c${debug.response_status} %c${debug.request_url}`,
-              'color: #0066cc; font-weight: bold',
-              debug.response_status >= 200 && debug.response_status < 300 ? 'color: #00cc00; font-weight: bold' : 'color: #cc0000; font-weight: bold',
-              'color: #666'
-            );
-            console.log('📍 Request URL:', debug.request_url);
-            console.log('🔧 Request Method:', debug.request_method);
-            console.log('📤 Request Headers:', debug.request_headers);
-            if (debug.request_body) {
-              console.log('📦 Request Body:', JSON.parse(debug.request_body));
-            }
-            console.log('📊 Response Status:', debug.response_status);
-            console.log('📥 Response Headers:', debug.response_headers);
-            if (response.is_binary) {
-              console.log('📦 Response Type: Binary (base64 encoded)');
-            } else {
-              console.log('📄 Response Body:', JSON.parse(response.body));
-            }
-            console.groupEnd();
-          }
+          logProxyTarget(response, reqData.url, reqData.method);
           
           // 处理响应体
           let responseBody;
@@ -373,30 +375,7 @@ export function initProxy(log, invoke) {
     
     invoke('proxy_request', { request: reqData })
       .then(response => {
-        // 打印调试信息
-        if (response.debug_info) {
-          const debug = response.debug_info;
-          console.groupCollapsed(
-            `%c${debug.request_method} %c${debug.response_status} %c${debug.request_url}`,
-            'color: #0066cc; font-weight: bold',
-            debug.response_status >= 200 && debug.response_status < 300 ? 'color: #00cc00; font-weight: bold' : 'color: #cc0000; font-weight: bold',
-            'color: #666'
-          );
-          console.log('📍 Request URL:', debug.request_url);
-          console.log('🔧 Request Method:', debug.request_method);
-          console.log('📤 Request Headers:', debug.request_headers);
-          if (debug.request_body) {
-            console.log('📦 Request Body:', JSON.parse(debug.request_body));
-          }
-          console.log('📊 Response Status:', debug.response_status);
-          console.log('📥 Response Headers:', debug.response_headers);
-          if (response.is_binary) {
-            console.log('📦 Response Type: Binary (base64 encoded)');
-          } else {
-            console.log('📄 Response Body:', JSON.parse(response.body));
-          }
-          console.groupEnd();
-        }
+        logProxyTarget(response, reqData.url, reqData.method);
         
         // 处理响应体
         let responseBody;

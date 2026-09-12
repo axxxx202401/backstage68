@@ -3,7 +3,9 @@ use crate::fingerprint::{get_device_fingerprint, get_device_info_json};
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::net::ToSocketAddrs;
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::State;
 use tokio::sync::Mutex;
 
@@ -95,6 +97,9 @@ pub struct ProxyResponse {
     pub headers: HashMap<String, String>,
     pub body: String, // 文本响应直接存储，二进制响应存储 base64 编码
     pub is_binary: bool, // 标识是否为二进制响应
+    pub resolved_host: String,
+    pub resolved_ips: Vec<String>,
+    pub preferred_ip: String,
     // 用于开发调试：记录完整的请求信息
     #[serde(skip_serializing_if = "Option::is_none")]
     pub debug_info: Option<ProxyDebugInfo>,
@@ -108,6 +113,53 @@ pub struct ProxyDebugInfo {
     pub request_body: Option<String>,
     pub response_status: u16,
     pub response_headers: HashMap<String, String>,
+    pub resolved_host: String,
+    pub resolved_ips: Vec<String>,
+    pub preferred_ip: String,
+}
+
+struct ResolvedTarget {
+    host: String,
+    ips: Vec<String>,
+}
+
+impl ResolvedTarget {
+    fn from_url(raw_url: &str) -> Self {
+        let parsed = match raw_url.parse::<reqwest::Url>() {
+            Ok(url) => url,
+            Err(_) => {
+                return Self {
+                    host: String::new(),
+                    ips: Vec::new(),
+                };
+            }
+        };
+        let host = parsed.host_str().unwrap_or("").to_string();
+        if host.is_empty() {
+            return Self {
+                host,
+                ips: Vec::new(),
+            };
+        }
+        let port = parsed.port_or_known_default().unwrap_or(443);
+        let ips = format!("{host}:{port}")
+            .to_socket_addrs()
+            .map(|addrs| addrs.map(|addr| addr.ip().to_string()).collect())
+            .unwrap_or_default();
+        Self { host, ips }
+    }
+
+    fn preferred_ip(&self) -> &str {
+        self.ips.first().map(String::as_str).unwrap_or("-")
+    }
+
+    fn ips_display(&self) -> String {
+        if self.ips.is_empty() {
+            "未能解析".to_string()
+        } else {
+            self.ips.join(" | ")
+        }
+    }
 }
 
 #[tauri::command]
@@ -120,10 +172,15 @@ pub async fn proxy_request(
         return Err("Internal IPC request, skipping".to_string());
     }
 
+    let resolved = ResolvedTarget::from_url(&request.url);
+
     log!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     log!("🔄 [PROXY REQUEST]");
     log!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     log!("📍 URL: {} {}", request.method, request.url);
+    log!("🌐 域名: {}", if resolved.host.is_empty() { "-" } else { &resolved.host });
+    log!("🌐 解析 IP: {}", resolved.ips_display());
+    log!("🎯 优先连接 IP: {}", resolved.preferred_ip());
 
     let app_state = state.lock().await;
     let client = &app_state.client;
@@ -232,10 +289,29 @@ pub async fn proxy_request(
 
     // 5. Send request
     log!("\n🚀 发送请求到后端...");
-    let resp = req_builder.send().await.map_err(|e| {
-        log!("❌ 请求失败: {}", e);
-        e.to_string()
-    })?;
+    log!("   URL: {}", request.url);
+    log!("   域名: {}  IP: {}", resolved.host, resolved.preferred_ip());
+    log!("   超时: 5s");
+    let resp = req_builder
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .map_err(|e| {
+            log!("❌ 请求失败");
+            log!("   URL: {}", request.url);
+            log!("   域名: {}", resolved.host);
+            log!("   解析 IP: {}", resolved.ips_display());
+            log!("   优先 IP: {}", resolved.preferred_ip());
+            log!("   错误: {}", e);
+            format!(
+                "请求失败 URL={} 域名={} 解析IP={} 连接IP={} 错误={}",
+                request.url,
+                resolved.host,
+                resolved.ips_display(),
+                resolved.preferred_ip(),
+                e
+            )
+        })?;
 
     // 6. Process response
     let status = resp.status().as_u16();
@@ -271,6 +347,8 @@ pub async fn proxy_request(
 
     if status == 403 {
         log!("⚠️  收到 403 Forbidden 响应！");
+        log!("   URL: {}", request.url);
+        log!("   域名: {}  IP: {}", resolved.host, resolved.preferred_ip());
         if !is_binary {
             log!(
                 "📄 响应内容: {}",
@@ -282,7 +360,12 @@ pub async fn proxy_request(
             );
         }
     } else {
-        log!("✅ 请求成功!");
+        log!("✅ 请求成功");
+        log!("   URL: {}", request.url);
+        log!("   域名: {}", resolved.host);
+        log!("   解析 IP: {}", resolved.ips_display());
+        log!("   连接 IP: {}", resolved.preferred_ip());
+        log!("   状态: {}", status);
     }
 
     log!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
@@ -302,6 +385,9 @@ pub async fn proxy_request(
             request_body: request.body.clone(),
             response_status: status,
             response_headers: headers.clone(),
+            resolved_host: resolved.host.clone(),
+            resolved_ips: resolved.ips.clone(),
+            preferred_ip: resolved.preferred_ip().to_string(),
         })
     } else {
         None
@@ -312,6 +398,9 @@ pub async fn proxy_request(
         headers,
         body,
         is_binary,
+        resolved_host: resolved.host.clone(),
+        resolved_ips: resolved.ips.clone(),
+        preferred_ip: resolved.preferred_ip().to_string(),
         debug_info,
     })
 }

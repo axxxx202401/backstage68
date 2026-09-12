@@ -104,4 +104,52 @@ const nestedInvoke = createFrameProxyInvoke(
 const nestedResponse = await nestedInvoke('proxy_request', { request });
 assert.equal(nestedResponse.status, 200);
 
+const fallbackParentEvents = createEventTarget();
+const fallbackChildEvents = createEventTarget();
+const fallbackChildWindow = {
+  ...fallbackChildEvents,
+  top: null
+};
+const fallbackParentWindow = {
+  ...fallbackParentEvents,
+  location: { origin: 'https://b12e88-gg-ooxx.8cmanage.com' },
+  postMessage(data) {
+    fallbackParentWindow.dispatch('message', {
+      data,
+      origin: 'https://b12e88-gg-ooxx.8cmanage.com',
+      source: fallbackChildWindow,
+      ports: []
+    });
+  }
+};
+fallbackChildWindow.top = fallbackParentWindow;
+fallbackChildWindow.postMessage = function postMessage(data) {
+  fallbackChildWindow.dispatch('message', { data });
+};
+
+let fallbackCommand;
+initMainFrameProxyBridge(() => {}, async (command, args) => {
+  fallbackCommand = command;
+  return { status: 200, headers: {}, body: '{"ok":true}', is_binary: false };
+}, fallbackParentWindow);
+
+const fallbackInvoke = createFrameProxyInvoke(
+  () => {},
+  fallbackChildWindow,
+  1000,
+  () => {
+    throw new Error('MessageChannel unavailable');
+  }
+);
+const fallbackResponse = await fallbackInvoke('proxy_request', {
+  request: {
+    method: 'POST',
+    url: 'https://b12e88-gg-ooxx.8cmanage.com/base_api/loginCheck',
+    headers: {},
+    body: null
+  }
+});
+assert.equal(fallbackCommand, 'proxy_request');
+assert.equal(fallbackResponse.status, 200);
+
 console.log('proxy bridge tests passed');

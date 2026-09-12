@@ -3,14 +3,26 @@ const RESPONSE_TYPE = 'backstage68:base-api-proxy-response';
 
 let requestCounter = 0;
 
-function sendResponse(port, id, result, error) {
-  if (!port || typeof port.postMessage !== 'function') return;
-  port.postMessage({
+function sendResponse(target, id, result, error) {
+  if (!target || typeof target.postMessage !== 'function') return false;
+  target.postMessage({
     type: RESPONSE_TYPE,
     id,
     result,
     error
   });
+  return true;
+}
+
+function resolveReplyTarget(event) {
+  const replyPort = event.ports?.[0];
+  if (replyPort && typeof replyPort.postMessage === 'function') {
+    return replyPort;
+  }
+  if (event.source && typeof event.source.postMessage === 'function') {
+    return event.source;
+  }
+  return null;
 }
 
 export function initMainFrameProxyBridge(log, invoke, targetWindow = window) {
@@ -18,9 +30,9 @@ export function initMainFrameProxyBridge(log, invoke, targetWindow = window) {
     const message = event.data;
     if (!message || message.type !== REQUEST_TYPE || !message.id) return;
 
-    const replyPort = event.ports?.[0];
-    if (!replyPort) {
-      log('❌ iframe 代理桥缺少 MessagePort，拒绝请求');
+    const replyTarget = resolveReplyTarget(event);
+    if (!replyTarget) {
+      log('❌ iframe 代理桥无法回传响应：缺少 MessagePort 和 event.source');
       return;
     }
 
@@ -37,12 +49,16 @@ export function initMainFrameProxyBridge(log, invoke, targetWindow = window) {
 
       log(`📨 顶层窗口收到 iframe 代理请求: ${request.url}`);
       const result = await invoke('proxy_request', { request });
-      log(`📤 顶层窗口返回 iframe 代理响应: ${request.url}`);
-      sendResponse(replyPort, message.id, result, null);
+      const ip = result?.preferred_ip || result?.debug_info?.preferred_ip || '-';
+      const ips = (result?.resolved_ips || result?.debug_info?.resolved_ips || []).join(' | ') || '-';
+      console.log(`[PROXY] ${request.method || ''} ${result?.status ?? ''} ${request.url}\n域名: ${result?.resolved_host || '-'}  连接IP: ${ip}  解析: ${ips}`);
+      log(`📤 顶层窗口返回 iframe 代理响应: ${request.url}  IP: ${ip}`);
+      sendResponse(replyTarget, message.id, result, null);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
+      console.error(`[PROXY] 失败 ${request.url}\n${reason}`);
       log(`❌ iframe 代理桥失败: ${reason}`);
-      sendResponse(replyPort, message.id, null, reason);
+      sendResponse(replyTarget, message.id, null, reason);
     }
   });
 }
@@ -60,38 +76,81 @@ export function createFrameProxyInvoke(
 
     const id = `${Date.now()}-${++requestCounter}`;
     return new Promise((resolve, reject) => {
-      const channel = createChannel();
-      const timer = setTimeout(() => {
-        channel.port1.close?.();
-        reject(new Error('iframe 代理请求超时'));
-      }, timeoutMs);
+      let settled = false;
+      let channel = null;
+      try {
+        channel = createChannel();
+      } catch (error) {
+        log(`⚠️ MessageChannel 不可用，改用 window.postMessage: ${error}`);
+      }
 
-      function handleResponse(event) {
-        const message = event.data;
-        if (!message || message.type !== RESPONSE_TYPE || message.id !== id) return;
-
+      function cleanup() {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
-        channel.port1.close?.();
+        channel?.port1?.close?.();
+        targetWindow.removeEventListener?.('message', handleWindowResponse);
+      }
+
+      function finish(message) {
+        if (settled || !message || message.type !== RESPONSE_TYPE || message.id !== id) {
+          return;
+        }
+        cleanup();
         if (message.error) {
           reject(new Error(message.error));
         } else {
-          log(`✅ iframe 收到 Rust 代理响应: ${args?.request?.url || ''}`);
+          const ip = message.result?.preferred_ip || message.result?.debug_info?.preferred_ip;
+          console.log(
+            `[PROXY] iframe 响应 ${args?.request?.url || ''}  连接IP: ${ip || '-'}`
+          );
+          log(
+            `✅ iframe 收到 Rust 代理响应: ${args?.request?.url || ''}` +
+            (ip ? `  IP: ${ip}` : '')
+          );
           resolve(message.result);
         }
       }
 
-      channel.port1.onmessage = handleResponse;
-      channel.port1.start?.();
+      function handlePortResponse(event) {
+        finish(event.data);
+      }
+
+      function handleWindowResponse(event) {
+        finish(event.data);
+      }
+
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error('iframe 代理请求超时'));
+      }, timeoutMs);
+
+      if (channel?.port1) {
+        channel.port1.onmessage = handlePortResponse;
+        channel.port1.start?.();
+      }
+      targetWindow.addEventListener?.('message', handleWindowResponse);
+
       log(`🔄 iframe 通过主窗口代理: ${args?.request?.url || ''}`);
+      const payload = {
+        type: REQUEST_TYPE,
+        id,
+        request: args?.request
+      };
+      const topWindow = targetWindow.top || targetWindow.parent;
+
       try {
-        targetWindow.top.postMessage({
-          type: REQUEST_TYPE,
-          id,
-          request: args?.request
-        }, '*', [channel.port2]);
+        if (channel?.port2) {
+          try {
+            topWindow.postMessage(payload, '*', [channel.port2]);
+            return;
+          } catch (error) {
+            log(`⚠️ MessagePort 传递失败，降级为 window.postMessage: ${error}`);
+          }
+        }
+        topWindow.postMessage(payload, '*');
       } catch (error) {
-        clearTimeout(timer);
-        channel.port1.close?.();
+        cleanup();
         reject(error);
       }
     });
