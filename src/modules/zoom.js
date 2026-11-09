@@ -2,11 +2,32 @@
  * 页面缩放模块
  */
 
-import { isMac, isLinux, getModifierKey } from './utils/dom.js';
+import { isMac, getModifierKey } from './utils/dom.js';
 
 const MIN_ZOOM = 0.25;   // 25%
 const MAX_ZOOM = 5.0;    // 500%
 const ZOOM_STEP = 0.05;  // 5%
+
+// 窗口尺寸不变。按缩放系数放大 iframe 的布局尺寸，再 scale 缩回原窗口，页面就按新分辨率排满。
+export function applyContentZoom(tabs, zoom, layoutZoom) {
+  const factor = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  const useLayout = Boolean(layoutZoom) && Math.abs(factor - 1) > 0.001;
+  for (const tab of tabs || []) {
+    const iframe = tab?.iframe;
+    if (!iframe?.style) continue;
+    if (!useLayout) {
+      iframe.style.transform = '';
+      iframe.style.transformOrigin = '';
+      iframe.style.width = '';
+      iframe.style.height = '';
+      continue;
+    }
+    iframe.style.transformOrigin = '0 0';
+    iframe.style.transform = `scale(${factor})`;
+    iframe.style.width = `${100 / factor}%`;
+    iframe.style.height = `${100 / factor}%`;
+  }
+}
 
 export function initZoom(log) {
   log("🔍 初始化缩放模块...");
@@ -16,6 +37,7 @@ export function initZoom(log) {
   let zoomTimeout = null;
   let isZooming = false; // 防止重叠的缩放操作
   let pendingZoom = null; // 等待执行的缩放值（防止堆积）
+  let zoomTouched = false;
 
   function createZoomIndicator() {
     if (!zoomIndicator) {
@@ -87,6 +109,11 @@ export function initZoom(log) {
     }
   }
 
+  function syncContentZoom() {
+    if (!isMac()) return;
+    applyContentZoom(window.tauriTabs?.tabs, currentZoom, true);
+  }
+
   // 执行缩放（优化版：隐藏非活动 iframe 减少渲染压力）
   async function applyZoom(zoom) {
     // 如果正在缩放，只保存最新值，不排队
@@ -96,6 +123,7 @@ export function initZoom(log) {
     }
     
     isZooming = true;
+    zoomTouched = true;
     let targetZoom = zoom;
     
     try {
@@ -119,6 +147,7 @@ export function initZoom(log) {
         // 通过 Rust command 调用 Tauri 原生缩放
         if (window.__TAURI__ && window.__TAURI__.core) {
           await window.__TAURI__.core.invoke('set_zoom', { zoomLevel: targetZoom });
+          syncContentZoom();
           log(`✅ 已应用缩放: ${Math.round(targetZoom * 100)}%`);
         } else {
           log.error("⚠️ Tauri API 不可用");
@@ -207,13 +236,49 @@ export function initZoom(log) {
     }
   }, { passive: false });
 
+  function adoptZoom(zoom, { announce = false } = {}) {
+    if (typeof zoom !== 'number' || !Number.isFinite(zoom)) return;
+    const next = Math.min(Math.max(zoom, MIN_ZOOM), MAX_ZOOM);
+    const changed = next !== currentZoom;
+    currentZoom = next;
+    if (window.tauriTabs) {
+      window.tauriTabs.currentZoom = currentZoom;
+    }
+    if (!changed && !announce) return;
+    if (announce) showZoomIndicator(currentZoom);
+    syncContentZoom();
+  }
+
+  const internals = window.__TAURI_INTERNALS__;
+  if (internals?.invoke && internals?.transformCallback) {
+    const callbackId = internals.transformCallback((event) => {
+      if (isZooming) return;
+      adoptZoom(event?.payload, { announce: true });
+    });
+    internals.invoke('plugin:event|listen', {
+      event: 'zoom-changed',
+      target: { kind: 'Any' },
+      handler: callbackId
+    }).catch((err) => {
+      log(`⚠️ 注册缩放同步失败: ${err}`);
+    });
+  }
+
+  if (window.__TAURI__?.core?.invoke) {
+    window.__TAURI__.core.invoke('get_zoom').then((zoom) => {
+      if (zoomTouched) return;
+      adoptZoom(zoom);
+    }).catch(() => {});
+  }
+
   // 暴露到全局
   window.tauriZoom = {
     zoomIn,
     zoomOut,
     reset: zoomReset,
     get: () => currentZoom,
-    set: applyZoom
+    set: applyZoom,
+    sync: syncContentZoom
   };
 
   log("✅ 缩放模块已启用");

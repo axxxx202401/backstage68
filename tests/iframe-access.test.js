@@ -27,7 +27,8 @@ assert.equal(getAccessibleIframeContext(blockedFrame), null);
 for (const relativePath of [
   '../src/modules/tabs/operations.js',
   '../src/modules/tabs/events.js',
-  '../src/modules/tabs/drag-simple.js'
+  '../src/modules/tabs/drag-simple.js',
+  '../src/modules/zoom.js'
 ]) {
   const source = await readFile(new URL(relativePath, import.meta.url), 'utf8');
   assert.doesNotMatch(

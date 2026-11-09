@@ -146,6 +146,7 @@ function createStyles() {
       bottom: 0;
       width: 100%;
       height: calc(100vh - ${TAB_CONFIG.tabBarHeight}px);
+      overflow: hidden;
     }
     .tauri-tab-iframe {
       width: 100%;

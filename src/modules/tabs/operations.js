@@ -284,6 +284,7 @@ export function createTab(url) {
   };
   
   tabs.push(tabData);
+  window.tauriZoom?.sync?.();
   
   // 监听 iframe 标题变化
   setupTitleObserver(iframe, id, tabData, log);

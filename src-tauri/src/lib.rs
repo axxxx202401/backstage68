@@ -1,6 +1,7 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tauri::{Builder, Emitter, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Builder, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tokio::sync::Mutex;
 
 mod crypto;
@@ -581,20 +582,59 @@ fn guess_extension(ct: &str) -> &'static str {
     }
 }
 
-/// 设置页面缩放（使用 Tauri 2.0 WebView 原生缩放）
-#[tauri::command]
-async fn set_zoom(window: tauri::WebviewWindow, zoom_level: f64) -> Result<(), String> {
-    // 使用 Tauri 2.0 的 WebView 原生缩放 API
-    // 这会像浏览器原生缩放一样工作，不会有 fixed 元素定位问题
-    window.set_zoom(zoom_level)
-        .map_err(|e| format!("Failed to set zoom: {}", e))
+/// 所有窗口共用的页面缩放。Cmd+/- 从任意页面触发后，每个窗口里的标签都使用这个比例。
+static APP_ZOOM_BITS: AtomicU64 = AtomicU64::new(0);
+
+fn stored_zoom() -> f64 {
+    let bits = APP_ZOOM_BITS.load(Ordering::Relaxed);
+    if bits == 0 {
+        return 1.0;
+    }
+    let zoom = f64::from_bits(bits);
+    if zoom.is_finite() && zoom > 0.0 {
+        zoom
+    } else {
+        1.0
+    }
 }
 
-/// 获取当前缩放级别（从前端存储）
+fn remember_zoom(zoom_level: f64) {
+    APP_ZOOM_BITS.store(zoom_level.to_bits(), Ordering::Relaxed);
+}
+
+fn apply_zoom_to_every_window(app: &tauri::AppHandle, zoom_level: f64) -> Result<(), String> {
+    // macOS 的 setPageZoom 只改变绘制比例，窗口宽高不变，缩小时页面排不满。
+    // 布局分辨率由前端处理，这里把原生缩放固定为 1。
+    let native_zoom = if cfg!(target_os = "macos") {
+        1.0
+    } else {
+        zoom_level
+    };
+    for (label, window) in app.webview_windows() {
+        window
+            .set_zoom(native_zoom)
+            .map_err(|e| format!("Failed to set zoom on {label}: {e}"))?;
+    }
+    Ok(())
+}
+
+/// 设置页面缩放，并同步到每一个窗口。
+#[tauri::command]
+async fn set_zoom(app: tauri::AppHandle, zoom_level: f64) -> Result<(), String> {
+    if !zoom_level.is_finite() {
+        return Err("Invalid zoom".to_string());
+    }
+    let zoom_level = zoom_level.clamp(0.25, 5.0);
+    remember_zoom(zoom_level);
+    apply_zoom_to_every_window(&app, zoom_level)?;
+    let _ = app.emit("zoom-changed", zoom_level);
+    Ok(())
+}
+
+/// 获取当前缩放级别
 #[tauri::command]
 async fn get_zoom() -> Result<f64, String> {
-    // 缩放级别由前端 JavaScript 管理
-    Ok(1.0)
+    Ok(stored_zoom())
 }
 
 /// 设置窗口标题
@@ -714,6 +754,11 @@ async fn create_new_window(
     .initialization_script_for_all_frames(&final_script)
     .build()
     .map_err(|e| format!("Failed to create window: {}", e))?;
+
+    let zoom = stored_zoom();
+    if (zoom - 1.0).abs() > f64::EPSILON {
+        apply_zoom_to_every_window(&app, zoom)?;
+    }
 
     Ok(window_label)
 }
@@ -856,6 +901,11 @@ fn create_reopen_window(app: &tauri::AppHandle) -> Result<(), String> {
     .initialization_script_for_all_frames(&final_script)
     .build()
     .map_err(|e| format!("Failed to create window: {}", e))?;
+
+    let zoom = stored_zoom();
+    if (zoom - 1.0).abs() > f64::EPSILON {
+        apply_zoom_to_every_window(app, zoom)?;
+    }
     
     log!("✓ New window created: {}", window_label);
     Ok(())
