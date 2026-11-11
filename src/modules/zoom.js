@@ -9,6 +9,7 @@ const MAX_ZOOM = 5.0;    // 500%
 const ZOOM_STEP = 0.05;  // 5%
 
 // 窗口尺寸不变。按缩放系数放大 iframe 的布局尺寸，再 scale 缩回原窗口，页面就按新分辨率排满。
+// iframe 用绝对定位，避免放大后的布局盒把外层容器撑出可滚动区域。
 export function applyContentZoom(tabs, zoom, layoutZoom) {
   const factor = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
   const useLayout = Boolean(layoutZoom) && Math.abs(factor - 1) > 0.001;
@@ -20,13 +21,37 @@ export function applyContentZoom(tabs, zoom, layoutZoom) {
       iframe.style.transformOrigin = '';
       iframe.style.width = '';
       iframe.style.height = '';
+      iframe.style.position = '';
+      iframe.style.left = '';
+      iframe.style.top = '';
+      if (iframe.dataset) delete iframe.dataset.contentZoom;
       continue;
     }
+    iframe.style.position = 'absolute';
+    iframe.style.left = '0';
+    iframe.style.top = '0';
     iframe.style.transformOrigin = '0 0';
     iframe.style.transform = `scale(${factor})`;
     iframe.style.width = `${100 / factor}%`;
     iframe.style.height = `${100 / factor}%`;
+    if (iframe.dataset) iframe.dataset.contentZoom = String(factor);
   }
+}
+
+// iframe 内部的 client rect 在布局坐标系里，视觉位置要再乘上缩放系数。
+export function contentZoomFactor(iframe) {
+  const factor = Number(iframe?.dataset?.contentZoom);
+  return Number.isFinite(factor) && factor > 0 ? factor : 1;
+}
+
+export function mapZoomedClientRect(rect, factor) {
+  const scale = Number.isFinite(factor) && factor > 0 ? factor : 1;
+  return {
+    left: rect.left * scale,
+    top: rect.top * scale,
+    width: rect.width * scale,
+    height: rect.height * scale
+  };
 }
 
 export function initZoom(log) {
@@ -109,9 +134,24 @@ export function initZoom(log) {
     }
   }
 
+  function resetOuterScroll() {
+    const container = document.querySelector('.tauri-iframe-container');
+    if (container && (container.scrollLeft || container.scrollTop)) {
+      container.scrollLeft = 0;
+      container.scrollTop = 0;
+    }
+    const root = document.scrollingElement || document.documentElement;
+    if (root && (root.scrollLeft || root.scrollTop)) {
+      root.scrollLeft = 0;
+      root.scrollTop = 0;
+    }
+  }
+
   function syncContentZoom() {
     if (!isMac()) return;
     applyContentZoom(window.tauriTabs?.tabs, currentZoom, true);
+    if (Math.abs(currentZoom - 1) > 0.001) resetOuterScroll();
+    window.dispatchEvent(new CustomEvent('tauri-content-zoom', { detail: currentZoom }));
   }
 
   // 执行缩放（优化版：隐藏非活动 iframe 减少渲染压力）
@@ -263,6 +303,13 @@ export function initZoom(log) {
       log(`⚠️ 注册缩放同步失败: ${err}`);
     });
   }
+
+  // 缩放后 iframe 的布局盒比窗口大。点开头像菜单会把这个盒子滚进视口，页面就整体错位。
+  const resetZoomScroll = () => {
+    if (Math.abs(currentZoom - 1) <= 0.001) return;
+    resetOuterScroll();
+  };
+  document.addEventListener('scroll', resetZoomScroll, true);
 
   if (window.__TAURI__?.core?.invoke) {
     window.__TAURI__.core.invoke('get_zoom').then((zoom) => {

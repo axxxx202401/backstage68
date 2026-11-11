@@ -6,6 +6,7 @@ import { createTab, closeTab, activateTab, refreshTab, hardRefreshTab, duplicate
 import { setupSimpleDrag } from './drag-simple.js';
 import { isMac, isLinux, isWindows } from '../utils/dom.js';
 import { getAccessibleIframeContext } from '../utils/iframe.js';
+import { contentZoomFactor, mapZoomedClientRect } from '../zoom.js';
 
 // 初始化事件监听
 export function initTabEvents() {
@@ -960,6 +961,7 @@ function showPageSearch() {
   let observedIframe = null;
   let iframeLoadHandler = null;
   let tabActivatedHandler = null;
+  let zoomHandler = null;
   
   // 获取当前活动的 iframe
   function getActiveIframe() {
@@ -987,10 +989,9 @@ function showPageSearch() {
       overflow: hidden;
     `;
     
-    // 将覆盖层放在 iframe 的父容器中
+    // 容器保持 position:fixed。改成 relative 会让放大后的 iframe 参与页面滚动，一点头像菜单整页就错位。
     const iframeParent = iframe.parentElement;
     if (iframeParent) {
-      iframeParent.style.position = 'relative';
       iframeParent.appendChild(highlightOverlay);
     }
     
@@ -1053,9 +1054,11 @@ function showPageSearch() {
           range.setEnd(match.node, match.index + match.length);
           
           const rects = range.getClientRects();
+          const zoom = contentZoomFactor(iframe);
           
           Array.from(rects).forEach(rect => {
             if (rect.width === 0 || rect.height === 0) return;
+            const mapped = mapZoomedClientRect(rect, zoom);
             
             const highlight = document.createElement('div');
             highlight.className = 'tauri-overlay-highlight';
@@ -1064,10 +1067,10 @@ function showPageSearch() {
             }
             highlight.style.cssText = `
               position: absolute;
-              left: ${rect.left}px;
-              top: ${rect.top}px;
-              width: ${rect.width}px;
-              height: ${rect.height}px;
+              left: ${mapped.left}px;
+              top: ${mapped.top}px;
+              width: ${mapped.width}px;
+              height: ${mapped.height}px;
               background-color: ${matchIndex === currentIndex ? 'rgba(255, 150, 50, 0.5)' : 'rgba(255, 255, 0, 0.4)'};
               border-radius: 2px;
               pointer-events: none;
@@ -1367,6 +1370,9 @@ function showPageSearch() {
       schedulePageResearch(100);
     };
     window.addEventListener('tauri-tab-activated', tabActivatedHandler);
+
+    zoomHandler = () => updateHighlightPositions();
+    window.addEventListener('tauri-content-zoom', zoomHandler);
   }
 
   function removePageChangeListeners() {
@@ -1380,9 +1386,13 @@ function showPageSearch() {
     if (tabActivatedHandler) {
       window.removeEventListener('tauri-tab-activated', tabActivatedHandler);
     }
+    if (zoomHandler) {
+      window.removeEventListener('tauri-content-zoom', zoomHandler);
+    }
     observedIframe = null;
     iframeLoadHandler = null;
     tabActivatedHandler = null;
+    zoomHandler = null;
   }
   
   // 滚动到当前高亮
